@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>MORODOK · 汽车抵押贷款管理系统</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--navy:#0f2d5c;--blue:#1565c0;--sky:#1e88e5;--light:#e3f2fd;--green:#2e7d32;--red:#c62828;--amber:#f57c00;--purple:#6a1b9a;--gray:#546e7a;--bg:#f0f4f8;--white:#fff;--border:#cfd8dc;--text:#1a2a3a;--muted:#78909c}
+html,body{height:100%;overflow:hidden}
+body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text)}
+.header{background:linear-gradient(135deg,#0a1f42,var(--navy) 40%,var(--blue) 80%,var(--sky));color:#fff;padding:0 20px;height:54px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 16px rgba(0,0,0,.35);position:fixed;top:0;left:0;right:0;z-index:200}
+.header-title{font-size:18px;font-weight:700;display:flex;align-items:center;gap:10px}
+.header-right{display:flex;align-items:center;gap:12px;font-size:12px}
+.chip{background:rgba(255,255,255,.15);padding:4px 12px;border-radius:20px;font-size:11px;border:1px solid rgba(255,255,255,.2)}
+.layout{display:flex;height:calc(100vh - 54px);margin-top:54px}
+.sidebar{width:215px;background:linear-gradient(180deg,#0a1f42,var(--navy));color:#fff;display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0}
+.sidebar::-webkit-scrollbar{width:3px}
+.sidebar::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15)}
+.sb-logo{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
+.sb-logo-sub{font-size:10px;color:rgba(255,255,255,.35);letter-spacing:2px}
+.sb-logo-name{font-size:15px;font-weight:700}
+.sb-label{font-size:9px;color:rgba(255,255,255,.3);padding:10px 16px 3px;letter-spacing:2px}
+.nav-item{display:flex;align-items:center;gap:9px;padding:9px 16px;cursor:pointer;font-size:12.5px;transition:all .18s;border-left:3px solid transparent;color:rgba(255,255,255,.65)}
+.nav-item:hover{background:rgba(255,255,255,.07);color:#fff;border-left-color:rgba(30,136,229,.5)}
+.nav-item.active{background:rgba(30,136,229,.25);border-left-color:#64b5f6;color:#fff;font-weight:500}
+.nav-icon{font-size:14px;width:16px;text-align:center}
+.nav-divider{height:1px;background:rgba(255,255,255,.07);margin:4px 12px}
+.nav-badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700}
+.main{flex:1;overflow-y:auto;padding:20px 22px}
+.main::-webkit-scrollbar{width:5px}
+.main::-webkit-scrollbar-thumb{background:#cfd8dc;border-radius:4px}
+.page-header{margin-bottom:18px}
+.page-title{font-size:20px;font-weight:700;color:var(--navy);display:flex;align-items:center;gap:8px;margin-bottom:3px}
+.page-sub{font-size:12px;color:var(--muted)}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.stat-card{background:#fff;border-radius:10px;padding:16px 18px;box-shadow:0 1px 4px rgba(0,0,0,.07);position:relative;overflow:hidden;transition:transform .2s}
+.stat-card:hover{transform:translateY(-2px)}
+.stat-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;border-radius:10px 10px 0 0}
+.stat-card.blue::before{background:linear-gradient(90deg,var(--sky),#42a5f5)}
+.stat-card.green::before{background:linear-gradient(90deg,var(--green),#43a047)}
+.stat-card.amber::before{background:linear-gradient(90deg,var(--amber),#ffa726)}
+.stat-card.red::before{background:linear-gradient(90deg,var(--red),#ef5350)}
+.stat-card.purple::before{background:linear-gradient(90deg,var(--purple),#ab47bc)}
+.stat-icon{position:absolute;right:14px;top:14px;font-size:28px;opacity:.12}
+.stat-label{font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:500}
+.stat-value{font-size:26px;font-weight:700;line-height:1}
+.stat-card.blue .stat-value{color:var(--sky)}.stat-card.green .stat-value{color:var(--green)}
+.stat-card.amber .stat-value{color:var(--amber)}.stat-card.red .stat-value{color:var(--red)}
+.stat-card.purple .stat-value{color:var(--purple)}
+.stat-sub{font-size:11px;color:var(--muted);margin-top:6px}
+.card{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.07);padding:18px 20px;margin-bottom:14px}
+.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.card-title{font-size:14px;font-weight:600;color:var(--navy)}
+.table-wrap{overflow-x:auto;border-radius:6px;border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{background:var(--navy);color:#fff;padding:9px 12px;text-align:left;font-weight:500;white-space:nowrap;font-size:12px}
+td{padding:9px 12px;border-bottom:1px solid #eef2f7;color:var(--text);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f8faff}
+.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:500}
+.badge-green{background:#e8f5e9;color:#2e7d32}.badge-red{background:#ffebee;color:#c62828}
+.badge-amber{background:#fff3e0;color:#e65100}.badge-blue{background:#e3f2fd;color:#1565c0}
+.badge-gray{background:#eceff1;color:#546e7a}
+.form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.form-group{display:flex;flex-direction:column;gap:5px}
+.form-group label{font-size:11px;color:var(--gray);font-weight:600}
+.form-group input,.form-group select,.form-group textarea{border:1.5px solid var(--border);border-radius:7px;padding:9px 11px;font-size:13px;font-family:inherit;background:#fff;color:var(--text);transition:all .2s;outline:none}
+.form-group input:focus,.form-group select:focus{border-color:var(--sky);box-shadow:0 0 0 3px rgba(30,136,229,.1)}
+.form-group.span2{grid-column:span 2}.form-group.span3{grid-column:span 3}
+.btn{padding:9px 18px;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all .2s;font-family:inherit;display:inline-flex;align-items:center;gap:6px}
+.btn-primary{background:var(--sky);color:#fff;box-shadow:0 2px 8px rgba(30,136,229,.3)}
+.btn-primary:hover{background:var(--blue);transform:translateY(-1px)}
+.btn-success{background:var(--green);color:#fff}
+.btn-success:hover{background:#1b5e20}
+.btn-danger{background:var(--red);color:#fff;padding:5px 11px;font-size:11px;border-radius:5px}
+.btn-sm{padding:5px 12px;font-size:12px}
+.btn-outline{background:transparent;border:1.5px solid var(--border);color:var(--gray)}
+.btn-outline:hover{border-color:var(--sky);color:var(--sky);background:#f0f7ff}
+.btn-row{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+.alert{padding:11px 15px;border-radius:8px;font-size:13px;margin-bottom:12px;border-left:3px solid}
+.alert-red{background:#ffebee;color:#b71c1c;border-color:var(--red)}
+.alert-amber{background:#fff8e1;color:#e65100;border-color:var(--amber)}
+.alert-green{background:#e8f5e9;color:#2e7d32;border-color:var(--green)}
+.alert-blue{background:#e3f2fd;color:#1565c0;border-color:var(--sky)}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(10,31,66,.6);z-index:500;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:#fff;border-radius:14px;padding:26px;min-width:550px;max-width:90vw;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.modal-title{font-size:16px;font-weight:700;color:var(--navy);margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.modal-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)}
+.home-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:16px}
+.home-card{background:#fff;border-radius:12px;padding:26px 14px;text-align:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.08);transition:all .25s;border:2px solid transparent}
+.home-card:hover{transform:translateY(-5px);box-shadow:0 10px 28px rgba(30,136,229,.2);border-color:var(--sky)}
+.home-card .icon{font-size:36px;margin-bottom:10px}
+.home-card .label{font-size:13px;font-weight:600;color:var(--navy)}
+.home-card .sublabel{font-size:11px;color:var(--muted);margin-top:3px}
+.search-row{display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap}
+.search-row input,.search-row select{border:1.5px solid var(--border);border-radius:7px;padding:8px 12px;font-size:13px;outline:none;font-family:inherit;background:#fff}
+.search-row input:focus,.search-row select:focus{border-color:var(--sky)}
+.search-row input{flex:1;min-width:180px}
+.reminder-item{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-radius:8px;margin-bottom:8px;font-size:13px;gap:12px}
+.reminder-item.overdue{background:#fff5f5;border-left:3px solid var(--red)}
+.reminder-item.warn{background:#fffbf0;border-left:3px solid var(--amber)}
+.reminder-item.info{background:#f0f7ff;border-left:3px solid var(--sky)}
+.loading-overlay{display:none;position:fixed;inset:0;background:rgba(10,31,66,.7);z-index:999;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+.loading-overlay.show{display:flex}
+.loading-spinner{width:48px;height:48px;border:4px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{color:#fff;font-size:15px}
+@media(max-width:768px){
+html,body{overflow:auto;height:auto}
+.sidebar{display:none}
+.layout{flex-direction:column;height:auto;margin-top:48px}
+.main{padding:12px;overflow-y:visible}
+.header{padding:0 14px;height:48px}
+.header-title{font-size:14px}
+.header-right .chip{display:none}
+.stats-grid{grid-template-columns:repeat(2,1fr);gap:8px}
+.stat-card{padding:12px 14px}
+.stat-value{font-size:20px}
+.home-grid{grid-template-columns:repeat(3,1fr);gap:10px}
+.home-card{padding:18px 8px}
+.home-card .icon{font-size:28px}
+.home-card .label{font-size:12px}
+.form-grid{grid-template-columns:1fr}
+.form-group.span2,.form-group.span3{grid-column:span 1}
+.search-row{flex-direction:column}
+.search-row input{width:100%}
+.modal{min-width:unset;width:95vw;padding:18px}
+table{font-size:11px;min-width:550px}
+th,td{padding:7px 8px}
+.card{padding:14px}
+.card-header{flex-direction:column;align-items:flex-start;gap:8px}
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-title">🚗 <span>汽车抵押贷款管理系统</span></div>
+  <div class="header-right">
+    <span id="syncStatus" style="display:flex;align-items:center;gap:5px;font-size:11px">
+      <span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:#4caf50;display:inline-block"></span>
+      <span id="syncTxt">已同步</span>
+    </span>
+    <span class="chip" id="dateDisplay"></span>
+    <span class="chip">陛下</span>
+  </div>
+</div>
+<div class="layout">
+  <div class="sidebar" id="sidebarEl"></div>
+  <div class="main" id="mainContent"></div>
+</div>
+<div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-title"><span id="modalTitle"></span><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">正在加载...</div>
+</div>
+<script>
+"use strict";
+
+// ══ SUPABASE 配置 ══
+var SUPABASE_URL = "https://atjacsmjkmqrhkqlpvzc.supabase.co";
+var SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0amFjc21qa21xcmhrcWxwdnpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxMTM1NTUsImV4cCI6MjA5NTY4OTU1NX0.M2QiMaCwSrY056LTUZkrt6KEgMIHn1nbJ8h8tIM0bss";
+
+var _loans = [];
+var _editId = null;
+var _currentNav = "home";
+var _financeRecords = [];
+var _syncStatus = "idle"; // idle | syncing | error
+
+// ══ Supabase API 封装 ══
+async function sbGet(key) {
+  try {
+    var res = await fetch(SUPABASE_URL+"/rest/v1/pawndata?key=eq."+encodeURIComponent(key)+"&select=value", {
+      headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY}
+    });
+    var data = await res.json();
+    return data.length ? JSON.parse(data[0].value) : null;
+  } catch(e) { return null; }
+}
+async function sbSet(key, value) {
+  try {
+    setSyncStatus("syncing");
+    var body = JSON.stringify({key:key, value:JSON.stringify(value)});
+    var res = await fetch(SUPABASE_URL+"/rest/v1/pawndata?on_conflict=key", {
+      method:"POST",
+      headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},
+      body:body
+    });
+    if(res.ok) setSyncStatus("ok"); else setSyncStatus("error");
+  } catch(e) { setSyncStatus("error"); }
+}
+function setSyncStatus(s) {
+  _syncStatus = s;
+  var dot = document.getElementById("syncDot");
+  var txt = document.getElementById("syncTxt");
+  if(!dot||!txt) return;
+  if(s==="syncing"){dot.style.background="#ff9800";txt.textContent="同步中...";}
+  else if(s==="ok"){dot.style.background="#4caf50";txt.textContent="已同步";}
+  else if(s==="error"){dot.style.background="#f44336";txt.textContent="同步失败";}
+}
+
+// ══ 数据读写（替换localStorage）══
+async function saveLoans() {
+  await sbSet("car_loans", _loans);
+}
+async function saveFinance() {
+  await sbSet("car_finance", _financeRecords);
+}
+async function loadAllData() {
+  setSyncStatus("syncing");
+  var loans = await sbGet("car_loans");
+  var finance = await sbGet("car_finance");
+  _loans = loans || [];
+  _financeRecords = finance || [];
+  setSyncStatus("ok");
+}
+function formatDate(d) { if(!d) return "-"; var dt=new Date(d); return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0"); }
+function formatMoney(n) { return "¥"+Number(n).toLocaleString(); }
+
+function calcMonthly(amount, rate, term) {
+  var r = rate / 100;
+  if(r === 0) return Math.round(amount / term);
+  return Math.round(amount * r * Math.pow(1+r, term) / (Math.pow(1+r, term) - 1));
+}
+
+function statusHtml(s) {
+  var m = {active:["还款中","badge-green"], pending:["审核中","badge-amber"], overdue:["已逾期","badge-red"], closed:["已结清","badge-gray"]};
+  var r = m[s] || ["未知","badge-amber"];
+  return "<span class=\"badge "+r[1]+"\">"+r[0]+"</span>";
+}
+
+function genId() {
+  var d = new Date();
+  var prefix = "CL"+d.getFullYear()+String(d.getMonth()+1).padStart(2,"0");
+  var n = 1;
+  for(var i=0;i<_loans.length;i++) {
+    if(_loans[i].id && _loans[i].id.startsWith(prefix)) {
+      var num = parseInt(_loans[i].id.slice(-3)) || 0;
+      if(num >= n) n = num+1;
+    }
+  }
+  return prefix+String(n).padStart(3,"0");
+}
+
+function buildSidebar() {
+  var items = [
+    {sec:"主菜单"},
+    {id:"home", icon:"🏠", label:"系统首页"},
+    {sec:"业务管理"},
+    {id:"add", icon:"➕", label:"新增贷款"},
+    {id:"list", icon:"📋", label:"贷款列表"},
+    {sec:"财务管理"},
+    {id:"finance_pnl", icon:"📊", label:"利润表"},
+    {id:"finance_cashflow", icon:"💰", label:"现金流"},
+    {id:"finance_income", icon:"💵", label:"收入登记"},
+    {id:"finance_expense", icon:"💸", label:"支出登记"},
+    {sec:"风控提醒"},
+    {id:"overdue", icon:"⚠️", label:"逾期催收"},
+  ];
+  var h = '<div class="sb-logo"><div class="sb-logo-sub">MORODOK</div><div class="sb-logo-name">车贷管理</div></div>';
+  for(var i=0;i<items.length;i++) {
+    var it = items[i];
+    if(it.sec) { h += '<div class="sb-label">'+it.sec+'</div>'; }
+    else {
+      var cls = (it.id===_currentNav) ? "nav-item active" : "nav-item";
+      h += '<div class="'+cls+'" onclick="nav(\''+it.id+'\')"><span class="nav-icon">'+it.icon+'</span>'+it.label+'</div>';
+    }
+  }
+  document.getElementById("sidebarEl").innerHTML = h;
+}
+
+function nav(page) {
+  _currentNav = page;
+  buildSidebar();
+  document.getElementById("loadingOverlay").classList.remove("show");
+  if(page==="home") renderHome();
+  else if(page==="add") renderAddForm();
+  else if(page==="list") renderList();
+  else if(page==="finance_pnl") renderFinancePnL();
+  else if(page==="finance_cashflow") renderCashFlow();
+  else if(page==="finance_income") renderFinanceForm("income");
+  else if(page==="finance_expense") renderFinanceForm("expense");
+  else if(page==="overdue") renderOverdue();
+}
+
+function renderHome() {
+  var total = _loans.length;
+  var active = _loans.filter(function(l){return l.status==="active"}).length;
+  var overdue = _loans.filter(function(l){return l.status==="overdue"}).length;
+  var pending = _loans.filter(function(l){return l.status==="pending"}).length;
+  var closed = _loans.filter(function(l){return l.status==="closed"}).length;
+  var totalAmt = _loans.reduce(function(s,l){return s+l.amount},0);
+  var activeAmt = _loans.filter(function(l){return l.status!=="closed"}).reduce(function(s,l){return s+l.amount},0);
+  var totalIncome = _financeRecords.filter(function(r){return r.type==="income"}).reduce(function(s,r){return s+r.amount},0);
+  var totalExpense = _financeRecords.filter(function(r){return r.type==="expense"}).reduce(function(s,r){return s+r.amount},0);
+  var profit = totalIncome - totalExpense;
+
+  var h = "";
+  h += '<div class="page-header"><div class="page-title">🏠 系统首页</div><div class="page-sub">汽车抵押贷款业务 · 财务一体化管理平台</div></div>';
+
+  h += '<div class="stats-grid">';
+  h += '<div class="stat-card blue"><div class="stat-icon">📄</div><div class="stat-label">合同总数</div><div class="stat-value">'+total+'</div><div class="stat-sub">笔贷款</div></div>';
+  h += '<div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-label">还款中</div><div class="stat-value">'+active+'</div><div class="stat-sub">笔</div></div>';
+  h += '<div class="stat-card amber"><div class="stat-icon">⏳</div><div class="stat-label">审核中</div><div class="stat-value">'+pending+'</div><div class="stat-sub">笔</div></div>';
+  h += '<div class="stat-card red"><div class="stat-icon">⚠️</div><div class="stat-label">已逾期</div><div class="stat-value">'+overdue+'</div><div class="stat-sub">笔</div></div>';
+  h += '<div class="stat-card purple"><div class="stat-icon">💰</div><div class="stat-label">累计收入</div><div class="stat-value">'+formatMoney(totalIncome)+'</div><div class="stat-sub">财务</div></div>';
+  h += '<div class="stat-card blue"><div class="stat-icon">💵</div><div class="stat-label">累计支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div><div class="stat-sub">财务</div></div>';
+  h += '<div class="stat-card green"><div class="stat-icon">📈</div><div class="stat-label">净利润</div><div class="stat-value">'+formatMoney(profit)+'</div><div class="stat-sub">'+(profit>=0?"盈利":"亏损")+'</div></div>';
+  h += '<div class="stat-card amber"><div class="stat-icon">🏦</div><div class="stat-label">在贷余额</div><div class="stat-value">'+formatMoney(activeAmt)+'</div><div class="stat-sub">未结清</div></div>';
+  h += "</div>";
+
+  h += '<div class="card"><div class="card-header"><div class="card-title">🚀 快速入口</div></div><div class="home-grid">';
+  h += '<div class="home-card" onclick="nav(\'add\')"><div class="icon">➕</div><div class="label">新增贷款</div><div class="sublabel">录入新合同</div></div>';
+  h += '<div class="home-card" onclick="nav(\'list\')"><div class="icon">📋</div><div class="label">贷款列表</div><div class="sublabel">查询/编辑</div></div>';
+  h += '<div class="home-card" onclick="nav(\'finance_income\')"><div class="icon">💵</div><div class="label">收入登记</div><div class="sublabel">记录收款</div></div>';
+  h += '<div class="home-card" onclick="nav(\'finance_expense\')"><div class="icon">💸</div><div class="label">支出登记</div><div class="sublabel">记录开支</div></div>';
+  h += '<div class="home-card" onclick="nav(\'finance_pnl\')"><div class="icon">📊</div><div class="label">利润表</div><div class="sublabel">财务分析</div></div>';
+  h += "</div></div>";
+
+  h += '<div class="card"><div class="card-header"><div class="card-title">📋 最近贷款记录</div></div>';
+  if(_loans.length===0) { h += '<div style="text-align:center;padding:40px;color:var(--muted)">暂无记录</div>'; }
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>车牌</th><th>金额</th><th>状态</th><th>放款日</th></tr></thead><tbody>';
+    var recent = _loans.slice(-5).reverse();
+    for(var i=0;i<recent.length;i++) {
+      var l = recent[i];
+      h += '<tr><td style="font-weight:600;color:var(--sky)">'+l.id+'</td><td>'+l.name+'</td><td>'+l.plate+'</td><td>'+formatMoney(l.amount)+'</td><td>'+statusHtml(l.status)+'</td><td>'+formatDate(l.date)+'</td></tr>';
+    }
+    h += "</tbody></table></div>";
+  }
+  h += "</div>";
+  document.getElementById("mainContent").innerHTML = h;
+}
+
+function renderAddForm(data) {
+  var isEdit = !!data;
+  var d = data || {};
+  var h = "";
+  h += '<div class="page-header"><div class="page-title">'+(isEdit?"✏️ ":"➕ ")+(isEdit?"编辑贷款":"新增贷款")+'</div><div class="page-sub">'+(isEdit?"修改贷款信息":"录入新的汽车抵押贷款合同")+'</div></div>';
+  h += '<div class="card"><div class="form-grid">';
+  h += '<div class="form-group"><label>客户姓名 *</label><input type="text" id="f_name" value="'+(d.name||"")+'" placeholder="请输入姓名"></div>';
+  h += '<div class="form-group"><label>手机号 *</label><input type="text" id="f_phone" value="'+(d.phone||"")+'" placeholder="请输入手机号"></div>';
+  h += '<div class="form-group"><label>身份证号</label><input type="text" id="f_idcard" value="'+(d.idcard||"")+'" placeholder="可选"></div>';
+  h += '<div class="form-group"><label>车牌号 *</label><input type="text" id="f_plate" value="'+(d.plate||"")+'" placeholder="如：京A88888"></div>';
+  h += '<div class="form-group"><label>车辆品牌</label><input type="text" id="f_brand" value="'+(d.brand||"")+'" placeholder="如：宝马、丰田"></div>';
+  h += '<div class="form-group"><label>车辆型号</label><input type="text" id="f_model" value="'+(d.model||"")+'" placeholder="如：X5 2022款"></div>';
+  h += '<div class="form-group"><label>车辆颜色</label><input type="text" id="f_color" value="'+(d.color||"")+'" placeholder="如：白色、黑色、银色"></div>';
+  h += '<div class="form-group"><label>评估价值（万元）</label><input type="number" id="f_estimate" value="'+(d.estimate||"")+'" placeholder="0" step="0.1"></div>';
+  h += '<div class="form-group"><label>贷款金额（元）*</label><input type="number" id="f_amount" value="'+(d.amount||"")+'" placeholder="0" min="0"></div>';
+  h += '<div class="form-group"><label>实际放款金额（元）</label><input type="number" id="f_actual_amount" value="'+(d.actualAmount||"")+'" placeholder="扣除手续费后实际到手金额" min="0" style="border-color:#2e7d32"></div>';
+  h += '<div class="form-group"><label>贷款期限</label><select id="f_term"><option value="3"'+(d.term==3?" selected":"")+'>3期</option><option value="6"'+(d.term==6?" selected":"")+'>6期</option><option value="12"'+(d.term==12||!d.term?" selected":"")+'>12期</option><option value="24"'+(d.term==24?" selected":"")+'>24期</option><option value="36"'+(d.term==36?" selected":"")+'>36期</option></select></div>';
+  h += '<div class="form-group"><label>月利率（%）</label><input type="number" id="f_rate" value="'+(d.rate!==undefined?d.rate:"0.8")+'" step="0.1" min="0" max="5"></div>';
+  h += '<div class="form-group"><label>还款方式</label><select id="f_repay"><option value="等额本息"'+(d.repay=="等额本息"||!d.repay?" selected":"")+'>等额本息</option><option value="先息后本"'+(d.repay=="先息后本"?" selected":"")+'>先息后本</option><option value="永续贷"'+(d.repay=="永续贷"?" selected":"")+'>永续贷</option></select></div>';
+  h += '<div class="form-group"><label>状态</label><select id="f_status"><option value="pending"'+(d.status=="pending"||!d.status?" selected":"")+'>审核中</option><option value="active"'+(d.status=="active"?" selected":"")+'>还款中</option><option value="overdue"'+(d.status=="overdue"?" selected":"")+'>已逾期</option><option value="closed"'+(d.status=="closed"?" selected":"")+'>已结清</option></select></div>';
+  h += '<div class="form-group"><label>放款日期</label><input type="date" id="f_date" value="'+(d.date||new Date().toISOString().slice(0,10))+'"></div>';
+  h += '<div class="form-group span3"><label>备注</label><textarea id="f_note" placeholder="其他需要记录的信息...">'+(d.note||"")+'</textarea></div>';
+  h += "</div></div>";
+  h += '<div class="btn-row"><button class="btn btn-primary" onclick="saveLoan()">✅ 保存</button>';
+  h += '<button class="btn btn-outline" onclick="nav(\'list\')">📋 查看列表</button>';
+  if(isEdit) h += '<button class="btn btn-outline" onclick="nav(\'list\')">取消</button>';
+  h += "</div>";
+  document.getElementById("mainContent").innerHTML = h;
+}
+
+async function saveLoan() {
+  var name = document.getElementById("f_name")?.value.trim();
+  var phone = document.getElementById("f_phone")?.value.trim();
+  var plate = document.getElementById("f_plate")?.value.trim();
+  var amount = parseFloat(document.getElementById("f_amount")?.value);
+  if(!name) { alert("请输入客户姓名"); return; }
+  if(!phone) { alert("请输入手机号"); return; }
+  if(!plate) { alert("请输入车牌号"); return; }
+  if(!amount || amount<=0) { alert("请输入有效的贷款金额"); return; }
+  var data = {
+    name:name, phone:phone, plate:plate,
+    idcard:document.getElementById("f_idcard")?.value.trim()||"",
+    brand:document.getElementById("f_brand")?.value.trim()||"",
+    color:document.getElementById("f_color")?.value.trim()||"",
+    actualAmount:parseFloat(document.getElementById("f_actual_amount")?.value)||0,
+    model:document.getElementById("f_model")?.value.trim()||"",
+    estimate:parseFloat(document.getElementById("f_estimate")?.value)||0,
+    amount:amount,
+    term:parseInt(document.getElementById("f_term")?.value)||12,
+    rate:parseFloat(document.getElementById("f_rate")?.value)||0,
+    repay:document.getElementById("f_repay")?.value||"等额本息",
+    status:document.getElementById("f_status")?.value||"pending",
+    date:document.getElementById("f_date")?.value||new Date().toISOString().slice(0,10),
+    note:document.getElementById("f_note")?.value.trim()||""
+  };
+  if(_editId) {
+    for(var i=0;i<_loans.length;i++) { if(_loans[i].id===_editId) { for(var k in data) _loans[i][k]=data[k]; break; } }
+    alert("✅ 贷款信息已更新");
+  } else {
+    data.id = genId();
+    _loans.unshift(data);
+    alert("✅ 新增贷款成功 编号："+data.id);
+  }
+  saveLoans(); _editId=null; nav("list");
+}
+
+function renderList() {
+  var h = '<div class="page-header"><div class="page-title">📋 贷款列表</div><div class="page-sub">共 '+_loans.length+' 笔</div></div>';
+  h += '<div class="search-row"><input type="text" id="searchInput" placeholder="搜索客户姓名/手机号/车牌..." oninput="filterList()">';
+  h += '<select id="statusFilter" onchange="filterList()"><option value="">全部状态</option><option value="active">还款中</option><option value="pending">审核中</option><option value="overdue">已逾期</option><option value="closed">已结清</option></select>';
+  h += '<button class="btn btn-success" onclick="nav(\'add\')">➕ 新增贷款</button></div>';
+  h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>手机号</th><th>车牌</th><th>品牌/颜色</th><th>贷款金额</th><th>实际放款</th><th>期限</th><th>月供</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th></tr></thead><tbody id="listBody"></tbody></table></div></div>';
+  document.getElementById("mainContent").innerHTML = h;
+  filterList();
+}
+
+function filterList() {
+  var q = (document.getElementById("searchInput")?.value||"").trim().toLowerCase();
+  var s = document.getElementById("statusFilter")?.value||"";
+  var filtered = _loans;
+  if(q) filtered = filtered.filter(function(l){ return l.name.indexOf(q)>=0 || l.phone.indexOf(q)>=0 || l.plate.toLowerCase().indexOf(q)>=0; });
+  if(s) filtered = filtered.filter(function(l){ return l.status===s; });
+  var tb = document.getElementById("listBody"); if(!tb) return;
+  if(filtered.length===0) { tb.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--muted)">暂无匹配记录</td></tr>'; return; }
+  var h = "";
+  for(var i=0;i<filtered.length;i++) {
+    var l = filtered[i];
+    h += '<tr><td style="font-weight:600;color:var(--sky)">'+l.id+'</td><td>'+l.name+'</td><td>'+l.phone+'</td><td>'+l.plate+'</td><td>'+(l.brand||"-")+(l.color?' <span style="font-size:11px;color:var(--muted)">'+l.color+'</span>':'')+'</td><td>'+formatMoney(l.amount)+'</td><td style="color:#2e7d32;font-weight:600">'+(l.actualAmount?formatMoney(l.actualAmount):'—')+'</td><td>'+l.term+'期</td><td>'+formatMoney(calcMonthly(l.amount,l.rate,l.term))+'</td><td><span style="font-size:12px;background:#e3f2fd;color:#1565c0;padding:2px 8px;border-radius:10px">'+(l.repay||'等额本息')+'</span></td><td>'+statusHtml(l.status)+'</td><td style="font-size:11px;color:var(--muted)">'+formatDate(l.date)+'</td>';
+    h += '<td><button class="btn btn-sm btn-primary" onclick="editLoan(\''+l.id+'\')">编辑</button> <button class="btn btn-sm btn-danger" onclick="deleteLoan(\''+l.id+'\')">删除</button></td></tr>';
+  }
+  tb.innerHTML = h;
+}
+
+function editLoan(id) {
+  for(var i=0;i<_loans.length;i++) { if(_loans[i].id===id) { _editId=id; renderAddForm(_loans[i]); return; } }
+}
+
+async function deleteLoan(id) {
+  if(!confirm("确定删除编号 "+id+" 的记录？")) return;
+  _loans = _loans.filter(function(l){ return l.id!==id; });
+  saveLoans(); filterList();
+}
+
+function renderFinanceForm(type) {
+  var isIncome = type==="income";
+  var title = isIncome ? "💵 收入登记" : "💸 支出登记";
+  var sub = isIncome ? "记录贷款收款、利息收入等" : "记录运营开支、办公费用等";
+  var h = '<div class="page-header"><div class="page-title">'+title+'</div><div class="page-sub">'+sub+'</div></div>';
+  h += '<div class="card"><div class="form-grid">';
+  h += '<div class="form-group"><label>金额（元）*</label><input type="number" id="fi_amount" placeholder="0" min="0"></div>';
+  h += '<div class="form-group"><label>分类</label><select id="fi_category">';
+  if(isIncome) {
+    h += '<option value="利息收入">利息收入</option><option value="本金回收">本金回收</option><option value="手续费">手续费</option><option value="滞纳金">滞纳金</option><option value="其他收入">其他收入</option>';
+  } else {
+    h += '<option value="办公费用">办公费用</option><option value="工资支出">工资支出</option><option value="推广费用">推广费用</option><option value="车辆评估">车辆评估费</option><option value="其他支出">其他支出</option>';
+  }
+  h += '</select></div><div class="form-group"><label>日期</label><input type="date" id="fi_date"></div>';
+  h += '<div class="form-group"><label>关联贷款编号（可选）</label><input type="text" id="fi_loanId" placeholder="如：CL202605001"></div>';
+  h += '<div class="form-group span2"><label>备注</label><input type="text" id="fi_note" placeholder="备注说明"></div>';
+  h += '</div><div class="btn-row"><button class="btn btn-primary" onclick="saveFinanceRecord(\''+type+'\')">✅ 保存</button>';
+  h += '<button class="btn btn-outline" onclick="nav(\'finance_pnl\')">📊 查看利润表</button></div></div>';
+  h += '<div class="card"><div class="card-header"><div class="card-title">📋 最近'+(isIncome?"收入":"支出")+'记录</div></div>';
+  var records = _financeRecords.filter(function(r){return r.type===type}).slice(-10).reverse();
+  if(records.length===0) { h += '<div style="text-align:center;padding:30px;color:var(--muted)">暂无记录</div>'; }
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>金额</th><th>分类</th><th>关联贷款</th><th>备注</th><th>操作</th></tr></thead><tbody>';
+    for(var i=0;i<records.length;i++) {
+      var r = records[i];
+      h += '<tr><td>'+formatDate(r.date)+'</td><td style="font-weight:600">'+formatMoney(r.amount)+'</td><td>'+r.category+'</td><td>'+(r.loanId||"-")+'</td><td style="color:var(--muted)">'+(r.note||"")+'</td>';
+      h += '<td><button class="btn btn-sm btn-danger" onclick="deleteFinanceRecord(\''+r.id+'\')">删除</button></td></tr>';
+    }
+    h += "</tbody></table></div>";
+  }
+  h += "</div>";
+  document.getElementById("mainContent").innerHTML = h;
+  var de = document.getElementById("fi_date"); if(de && !de.value) de.value = new Date().toISOString().slice(0,10);
+}
+
+async function saveFinanceRecord(type) {
+  var amount = parseFloat(document.getElementById("fi_amount")?.value);
+  if(!amount || amount<=0) { alert("请输入有效的金额"); return; }
+  var rec = {
+    id: "F"+Date.now(),
+    type: type,
+    amount: amount,
+    category: document.getElementById("fi_category")?.value||"其他",
+    date: document.getElementById("fi_date")?.value||new Date().toISOString().slice(0,10),
+    loanId: document.getElementById("fi_loanId")?.value.trim()||"",
+    note: document.getElementById("fi_note")?.value.trim()||""
+  };
+  _financeRecords.unshift(rec);
+  saveFinance();
+  alert("✅ "+(type==="income"?"收入":"支出")+"记录已保存");
+  renderFinanceForm(type);
+}
+
+async function deleteFinanceRecord(id) {
+  if(!confirm("确定删除此记录？")) return;
+  _financeRecords = _financeRecords.filter(function(r){ return r.id!==id; });
+  saveFinance();
+  renderFinanceForm(_financeRecords.length>0 ? _financeRecords[0].type : "income");
+}
+
+function renderFinancePnL() {
+  var totalIncome = _financeRecords.filter(function(r){return r.type==="income"}).reduce(function(s,r){return s+r.amount},0);
+  var totalExpense = _financeRecords.filter(function(r){return r.type==="expense"}).reduce(function(s,r){return s+r.amount},0);
+  var profit = totalIncome - totalExpense;
+  var loanIncome = _loans.reduce(function(s,l){return s+(l.status!=="closed"?calcMonthly(l.amount,l.rate,l.term):0)},0);
+  var incomeByCat = {}; _financeRecords.filter(function(r){return r.type==="income"}).forEach(function(r){ incomeByCat[r.category]=(incomeByCat[r.category]||0)+r.amount; });
+  var expenseByCat = {}; _financeRecords.filter(function(r){return r.type==="expense"}).forEach(function(r){ expenseByCat[r.category]=(expenseByCat[r.category]||0)+r.amount; });
+
+  var h = '<div class="page-header"><div class="page-title">📊 利润表</div><div class="page-sub">财务数据概览与分析</div></div>';
+  h += '<div class="stats-grid">';
+  h += '<div class="stat-card green"><div class="stat-icon">💵</div><div class="stat-label">总收入</div><div class="stat-value">'+formatMoney(totalIncome)+'</div><div class="stat-sub">'+_financeRecords.filter(function(r){return r.type==="income"}).length+'笔</div></div>';
+  h += '<div class="stat-card red"><div class="stat-icon">💸</div><div class="stat-label">总支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div><div class="stat-sub">'+_financeRecords.filter(function(r){return r.type==="expense"}).length+'笔</div></div>';
+  h += '<div class="stat-card blue"><div class="stat-icon">📈</div><div class="stat-label">净利润</div><div class="stat-value">'+formatMoney(profit)+'</div><div class="stat-sub">'+(profit>=0?"盈利":"亏损")+'</div></div>';
+  h += '<div class="stat-card amber"><div class="stat-icon">🏦</div><div class="stat-label">月预期收款</div><div class="stat-value">'+formatMoney(loanIncome)+'</div><div class="stat-sub">在贷月供合计</div></div>';
+  h += "</div>";
+
+  h += '<div class="card"><div class="card-header"><div class="card-title">💵 收入明细</div></div>';
+  var ik = Object.keys(incomeByCat);
+  if(ik.length===0) { h += '<div style="padding:20px;color:var(--muted)">暂无收入记录</div>'; }
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>收入分类</th><th>金额</th><th>占比</th></tr></thead><tbody>';
+    for(var k in incomeByCat) { var pct=totalIncome>0?Math.round(incomeByCat[k]/totalIncome*100):0; h += '<tr><td>'+k+'</td><td style="font-weight:600;color:var(--green)">'+formatMoney(incomeByCat[k])+'</td><td>'+pct+'%</td></tr>'; }
+    h += '<tr style="font-weight:700;background:#f8fff8"><td>合计</td><td style="color:var(--green)">'+formatMoney(totalIncome)+'</td><td>100%</td></tr>';
+    h += "</tbody></table></div>";
+  }
+  h += "</div>";
+
+  h += '<div class="card"><div class="card-header"><div class="card-title">💸 支出明细</div></div>';
+  var ek = Object.keys(expenseByCat);
+  if(ek.length===0) { h += '<div style="padding:20px;color:var(--muted)">暂无支出记录</div>'; }
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>支出分类</th><th>金额</th><th>占比</th></tr></thead><tbody>';
+    for(var k in expenseByCat) { var pct=totalExpense>0?Math.round(expenseByCat[k]/totalExpense*100):0; h += '<tr><td>'+k+'</td><td style="font-weight:600;color:var(--red)">'+formatMoney(expenseByCat[k])+'</td><td>'+pct+'%</td></tr>'; }
+    h += '<tr style="font-weight:700;background:#fff8f8"><td>合计</td><td style="color:var(--red)">'+formatMoney(totalExpense)+'</td><td>100%</td></tr>';
+    h += "</tbody></table></div>";
+  }
+  h += "</div>";
+  h += '<div class="btn-row"><button class="btn btn-primary" onclick="nav(\'finance_income\')">💵 新增收入</button>';
+  h += '<button class="btn btn-danger" onclick="nav(\'finance_expense\')">💸 新增支出</button>';
+  h += '<button class="btn btn-outline" onclick="nav(\'finance_cashflow\')">💰 现金流</button></div>';
+  document.getElementById("mainContent").innerHTML = h;
+}
+
+function renderCashFlow() {
+  var sorted = _financeRecords.slice().sort(function(a,b){ return a.date.localeCompare(b.date); });
+  var running = 0; var flowData = [];
+  for(var i=0;i<sorted.length;i++) { var r=sorted[i]; if(r.type==="income") running+=r.amount; else running-=r.amount; flowData.push({date:r.date,type:r.type,amount:r.amount,balance:running,category:r.category}); }
+  var totalIncome = _financeRecords.filter(function(r){return r.type==="income"}).reduce(function(s,r){return s+r.amount},0);
+  var totalExpense = _financeRecords.filter(function(r){return r.type==="expense"}).reduce(function(s,r){return s+r.amount},0);
+  var balance = totalIncome - totalExpense;
+  var h = '<div class="page-header"><div class="page-title">💰 现金流</div><div class="page-sub">资金流水与余额变化</div></div>';
+  h += '<div class="stats-grid"><div class="stat-card green"><div class="stat-label">总收入</div><div class="stat-value">'+formatMoney(totalIncome)+'</div></div>';
+  h += '<div class="stat-card red"><div class="stat-label">总支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div></div>';
+  h += '<div class="stat-card blue"><div class="stat-label">当前余额</div><div class="stat-value">'+formatMoney(balance)+'</div></div>';
+  h += '<div class="stat-card amber"><div class="stat-label">交易笔数</div><div class="stat-value">'+_financeRecords.length+'</div></div></div>';
+  h += '<div class="card"><div class="card-header"><div class="card-title">📋 流水明细</div></div>';
+  if(flowData.length===0) { h += '<div style="text-align:center;padding:30px;color:var(--muted)">暂无流水记录</div>'; }
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>类型</th><th>分类</th><th>金额</th><th>余额</th></tr></thead><tbody>';
+    for(var i=flowData.length-1;i>=0;i--) {
+      var r = flowData[i]; var amtStyle = r.type==="income" ? "color:var(--green);font-weight:600" : "color:var(--red);font-weight:600";
+      var tl = r.type==="income" ? "收入" : "支出";
+      h += '<tr><td>'+formatDate(r.date)+'</td><td>'+tl+'</td><td>'+r.category+'</td><td style="'+amtStyle+'">'+(r.type==="income"?"+":"-")+formatMoney(r.amount)+'</td><td style="font-weight:600">'+formatMoney(r.balance)+'</td></tr>';
+    }
+    h += "</tbody></table></div>";
+  }
+  h += "</div>";
+  document.getElementById("mainContent").innerHTML = h;
+}
+
+function renderOverdue() {
+  var overdue = _loans.filter(function(l){return l.status==="overdue"});
+  var h = '<div class="page-header"><div class="page-title">⚠️ 逾期催收</div><div class="page-sub">共 '+overdue.length+' 笔逾期贷款</div></div>';
+  if(overdue.length===0) { h += '<div class="card" style="text-align:center;padding:50px"><div style="font-size:48px;margin-bottom:12px">🎉</div><div style="font-size:16px;font-weight:600;color:var(--green)">暂无逾期贷款！</div></div>'; document.getElementById("mainContent").innerHTML = h; return; }
+  h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>手机号</th><th>车牌</th><th>金额</th><th>月供</th><th>放款日</th><th>操作</th></tr></thead><tbody>';
+  for(var i=0;i<overdue.length;i++) { var l=overdue[i]; h += '<tr style="background:#fff5f5"><td style="font-weight:600;color:var(--red)">'+l.id+'</td><td>'+l.name+'</td><td>'+l.phone+'</td><td>'+l.plate+'</td><td style="font-weight:600">'+formatMoney(l.amount)+'</td><td>'+formatMoney(calcMonthly(l.amount,l.rate,l.term))+'</td><td>'+formatDate(l.date)+'</td><td><button class="btn btn-sm btn-primary" onclick="editLoan(\''+l.id+'\')">处理</button></td></tr>'; }
+  h += "</tbody></table></div></div>";
+  document.getElementById("mainContent").innerHTML = h;
+}
+
+async function initDemoData() {
+  if(_loans.length > 0) return;
+  _loans = [
+    {id:"CL202605001", name:"张三", phone:"13888888888", plate:"京A88888", brand:"宝马", model:"X5 2022款", estimate:45, amount:360000, term:24, rate:0.7, repay:"等额本息", status:"active", date:"2026-05-15", note:"优质客户"},
+    {id:"CL202605002", name:"李四", phone:"13966666666", plate:"沪B12345", brand:"丰田", model:"凯美瑞 2021款", estimate:18, amount:144000, term:12, rate:0.9, repay:"等额本息", status:"active", date:"2026-05-10", note:""},
+    {id:"CL202605003", name:"王五", phone:"13755555555", plate:"粤C67890", brand:"奔驰", model:"C200L", estimate:30, amount:300000, term:36, rate:0.6, repay:"先息后本", status:"pending", date:"2026-05-20", note:"待补充流水"},
+    {id:"CL202605004", name:"赵六", phone:"13633333333", plate:"苏D24680", brand:"大众", model:"帕萨特 2020款", estimate:15, amount:120000, term:12, rate:1.0, repay:"等额本息", status:"overdue", date:"2025-11-01", note:"逾期35天"},
+    {id:"CL202605005", name:"孙七", phone:"13522222222", plate:"浙E13579", brand:"本田", model:"雅阁 2019款", estimate:12, amount:96000, term:12, rate:0.8, repay:"等额本息", status:"closed", date:"2025-01-10", note:"已结清"},
+    {id:"CL202605006", name:"周八", phone:"13411111111", plate:"川F97531", brand:"奥迪", model:"A4L", estimate:25, amount:200000, term:24, rate:0.75, repay:"等额本息", status:"active", date:"2026-04-01", note:""},
+  ];
+  saveLoans();
+  if(_financeRecords.length>0) return;
+  _financeRecords = [
+    {id:"F1", type:"income", amount:18000, category:"利息收入", date:"2026-05-15", loanId:"CL202605001", note:"5月利息"},
+    {id:"F2", type:"income", amount:7200, category:"利息收入", date:"2026-05-10", loanId:"CL202605002", note:"5月利息"},
+    {id:"F3", type:"income", amount:5000, category:"手续费", date:"2026-05-01", loanId:"", note:"贷款手续费"},
+    {id:"F4", type:"expense", amount:8000, category:"工资支出", date:"2026-05-05", loanId:"", note:"员工工资"},
+    {id:"F5", type:"expense", amount:3000, category:"办公费用", date:"2026-05-08", loanId:"", note:"办公室租金"},
+    {id:"F6", type:"income", amount:15000, category:"本金回收", date:"2026-05-20", loanId:"CL202605005", note:"结清还款"},
+  ];
+  saveFinance();
+}
+
+document.getElementById("dateDisplay").textContent = new Date().toLocaleDateString("zh-CN", {month:"long", day:"numeric", weekday:"short"});
+buildSidebar();
+// 从Supabase加载数据后再渲染
+loadAllData().then(function() {
+  renderHome();
+  document.getElementById("loadingOverlay").classList.remove("show");
+}).catch(function() {
+  document.getElementById("loadingOverlay").classList.remove("show");
+  renderHome();
+});
+</script>
+</body>
+</html>
