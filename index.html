@@ -164,38 +164,13 @@ th,td{padding:7px 8px}
 <script>
 "use strict";
 
-// ══ SUPABASE 配置 ══
-var SUPABASE_URL = "https://atjacsmjkmqrhkqlpvzc.supabase.co";
-var SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0amFjc21qa21xcmhrcWxwdnpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxMTM1NTUsImV4cCI6MjA5NTY4OTU1NX0.M2QiMaCwSrY056LTUZkrt6KEgMIHn1nbJ8h8tIM0bss";
-
+// ══ 后端API配置（Key藏在服务器，前端看不到）══
 var _loans = [];
 var _editId = null;
 var _currentNav = "home";
 var _financeRecords = [];
-var _syncStatus = "idle"; // idle | syncing | error
+var _syncStatus = "idle";
 
-// ══ Supabase API 封装 ══
-async function sbGet(key) {
-  try {
-    var res = await fetch(SUPABASE_URL+"/rest/v1/pawndata?key=eq."+encodeURIComponent(key)+"&select=value", {
-      headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY}
-    });
-    var data = await res.json();
-    return data.length ? JSON.parse(data[0].value) : null;
-  } catch(e) { return null; }
-}
-async function sbSet(key, value) {
-  try {
-    setSyncStatus("syncing");
-    var body = JSON.stringify({key:key, value:JSON.stringify(value)});
-    var res = await fetch(SUPABASE_URL+"/rest/v1/pawndata?on_conflict=key", {
-      method:"POST",
-      headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY,"Content-Type":"application/json","Prefer":"resolution=merge-duplicates"},
-      body:body
-    });
-    if(res.ok) setSyncStatus("ok"); else setSyncStatus("error");
-  } catch(e) { setSyncStatus("error"); }
-}
 function setSyncStatus(s) {
   _syncStatus = s;
   var dot = document.getElementById("syncDot");
@@ -206,20 +181,42 @@ function setSyncStatus(s) {
   else if(s==="error"){dot.style.background="#f44336";txt.textContent="同步失败";}
 }
 
-// ══ 数据读写（替换localStorage）══
+// ══ 通过后端API读写数据（Supabase Key不暴露）══
 async function saveLoans() {
-  await sbSet("car_loans", _loans);
+  try {
+    setSyncStatus("syncing");
+    var res = await fetch("/api/data", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({car_loans:_loans})
+    });
+    if(res.ok) setSyncStatus("ok"); else setSyncStatus("error");
+  } catch(e) { setSyncStatus("error"); }
 }
 async function saveFinance() {
-  await sbSet("car_finance", _financeRecords);
+  try {
+    setSyncStatus("syncing");
+    var res = await fetch("/api/data", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({car_finance:_financeRecords})
+    });
+    if(res.ok) setSyncStatus("ok"); else setSyncStatus("error");
+  } catch(e) { setSyncStatus("error"); }
 }
 async function loadAllData() {
-  setSyncStatus("syncing");
-  var loans = await sbGet("car_loans");
-  var finance = await sbGet("car_finance");
-  _loans = loans || [];
-  _financeRecords = finance || [];
-  setSyncStatus("ok");
+  try {
+    setSyncStatus("syncing");
+    var res = await fetch("/api/data");
+    var data = await res.json();
+    _loans = data.car_loans || [];
+    _financeRecords = data.car_finance || [];
+    setSyncStatus("ok");
+  } catch(e) {
+    setSyncStatus("error");
+    _loans = [];
+    _financeRecords = [];
+  }
 }
 function formatDate(d) { if(!d) return "-"; var dt=new Date(d); return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0"); }
 function formatMoney(n) { return "¥"+Number(n).toLocaleString(); }
