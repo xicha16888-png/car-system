@@ -108,30 +108,57 @@ tr:hover td{background:#f8faff}
 .loading-spinner{width:48px;height:48px;border:4px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .loading-text{color:#fff;font-size:15px}
+.mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;height:58px;background:linear-gradient(0deg,#0a1f42,#0f2d5c);z-index:300;flex-direction:row;align-items:stretch;border-top:1px solid rgba(255,255,255,.12)}
+.mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;color:rgba(255,255,255,.5);font-size:10px;transition:color .15s;padding:4px 2px;-webkit-tap-highlight-color:transparent}
+.mob-nav-item.active{color:#64b5f6}
+.mob-nav-item .mi{font-size:22px;line-height:1}
+.mob-more-panel{display:none;position:fixed;bottom:58px;left:0;right:0;background:#fff;z-index:299;border-top:1px solid #e0e0e0;box-shadow:0 -6px 24px rgba(0,0,0,.12);border-radius:18px 18px 0 0;padding:6px 0 14px}
+.mob-more-panel.open{display:block}
+.mob-more-item{display:flex;align-items:center;gap:14px;padding:14px 24px;font-size:14px;cursor:pointer;color:var(--text);-webkit-tap-highlight-color:transparent}
+.mob-more-item:active{background:#f5f5f5}
+.mob-more-item .mmi{font-size:22px;width:30px;text-align:center}
+.mob-divider{height:1px;background:#f0f0f0;margin:4px 16px}
+.loan-card{background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 2px 8px rgba(0,0,0,.07);border-left:4px solid var(--sky);margin-bottom:10px}
+.loan-card.overdue{border-left-color:var(--red)}
+.loan-card.closed{border-left-color:#9e9e9e}
+.loan-card.pending{border-left-color:var(--amber)}
+.loan-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
+.loan-card-name{font-size:16px;font-weight:700;color:var(--navy)}
+.loan-card-meta{font-size:11px;color:var(--muted);margin-top:2px}
+.loan-card-row{display:flex;justify-content:space-between;padding:4px 0;font-size:13px;border-bottom:1px solid #f5f5f5}
+.loan-card-row:last-of-type{border:none}
+.loan-card-lbl{color:var(--muted)}
+.loan-card-val{font-weight:600}
+.loan-card-btns{display:flex;gap:8px;margin-top:12px}
+.loan-card-btns .btn{flex:1;padding:9px;font-size:13px;text-align:center}
 @media(max-width:768px){
 html,body{overflow:auto;height:auto}
 .sidebar{display:none}
-.layout{flex-direction:column;height:auto;margin-top:48px}
-.main{padding:12px;overflow-y:visible}
-.header{padding:0 14px;height:48px}
-.header-title{font-size:14px}
+.mob-nav{display:flex}
+.layout{flex-direction:column;height:auto;margin-top:48px;margin-bottom:60px}
+.main{padding:10px;overflow-y:visible}
+.header{padding:0 12px;height:48px}
+.header-title{font-size:13px;gap:6px}
 .header-right .chip{display:none}
 .stats-grid{grid-template-columns:repeat(2,1fr);gap:8px}
-.stat-card{padding:12px 14px}
+.stat-card{padding:10px 12px}
 .stat-value{font-size:20px}
-.home-grid{grid-template-columns:repeat(3,1fr);gap:10px}
-.home-card{padding:18px 8px}
-.home-card .icon{font-size:28px}
-.home-card .label{font-size:12px}
+.home-grid{grid-template-columns:repeat(3,1fr);gap:8px}
+.home-card{padding:14px 4px}
+.home-card .icon{font-size:26px;margin-bottom:6px}
+.home-card .label{font-size:11px}
+.home-card .sublabel{display:none}
 .form-grid{grid-template-columns:1fr}
 .form-group.span2,.form-group.span3{grid-column:span 1}
-.search-row{flex-direction:column}
-.search-row input{width:100%}
-.modal{min-width:unset;width:95vw;padding:18px}
-table{font-size:11px;min-width:550px}
-th,td{padding:7px 8px}
-.card{padding:14px}
+.search-row{flex-direction:column;gap:8px}
+.search-row input,.search-row select{width:100%}
+.modal{min-width:unset;width:96vw;padding:16px;max-height:88vh;overflow-y:auto}
+.card{padding:12px}
 .card-header{flex-direction:column;align-items:flex-start;gap:8px}
+.btn-row{flex-wrap:wrap;gap:8px}
+.btn-row .btn{flex:1;min-width:110px;padding:10px 8px}
+.page-header{margin-bottom:12px}
+.page-title{font-size:15px}
 }
 </style>
 </head>
@@ -150,6 +177,22 @@ th,td{padding:7px 8px}
 <div class="layout">
   <div class="sidebar" id="sidebarEl"></div>
   <div class="main" id="mainContent"></div>
+</div>
+<div class="mob-nav" id="mobNav">
+  <div class="mob-nav-item" id="mn_home" onclick="nav('home')"><span class="mi">🏠</span>首页</div>
+  <div class="mob-nav-item" id="mn_add" onclick="nav('add')"><span class="mi">➕</span>新增</div>
+  <div class="mob-nav-item" id="mn_list" onclick="nav('list')"><span class="mi">📋</span>列表</div>
+  <div class="mob-nav-item" id="mn_overdue" onclick="nav('overdue')"><span class="mi">⚠️</span>逾期</div>
+  <div class="mob-nav-item" onclick="toggleMobMore()"><span class="mi">☰</span>更多</div>
+</div>
+<div class="mob-more-panel" id="mobMorePanel">
+  <div class="mob-more-item" onclick="closeMobMore();nav('finance_pnl')"><span class="mmi">📊</span>利润表</div>
+  <div class="mob-more-item" onclick="closeMobMore();nav('finance_cashflow')"><span class="mmi">💰</span>现金流</div>
+  <div class="mob-more-item" onclick="closeMobMore();nav('finance_income')"><span class="mmi">💵</span>收入登记</div>
+  <div class="mob-more-item" onclick="closeMobMore();nav('finance_expense')"><span class="mmi">💸</span>支出登记</div>
+  <div class="mob-divider"></div>
+  <div class="mob-more-item" onclick="closeMobMore();doBackup()"><span class="mmi">💾</span>备份数据</div>
+  <div class="mob-more-item" onclick="closeMobMore();doRestore()"><span class="mmi">📂</span>恢复数据</div>
 </div>
 <div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
   <div class="modal">
@@ -171,6 +214,45 @@ var _currentNav = "home";
 var _financeRecords = [];
 var _syncStatus = "idle";
 
+
+function doBackup() {
+  var today = new Date().toISOString().slice(0,10);
+  var j = JSON.stringify({car_loans:_loans, car_finance:_financeRecords},null,2);
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([j],{type:"application/json"}));
+  a.download = "CAR_backup_"+today+".json"; a.click();
+  var csv1 = ["编号,客户,手机,车牌,品牌,型号,颜色,评估价,贷款金额,实际放款,月利率%,期限,方式,状态,放款日,备注"];
+  _loans.forEach(function(l){csv1.push([l.id,l.name,l.phone,l.idcard||"",l.brand||"",l.model||"",l.color||"",l.estimate||0,l.amount,l.actualAmount||"",l.rate,l.term,l.repay||"",l.status,l.date,(l.note||"").replace(/,/g,"；")].join(","));});
+  setTimeout(function(){var a2=document.createElement("a");a2.href=URL.createObjectURL(new Blob(["﻿"+csv1.join("\n")],{type:"text/csv;charset=utf-8"}));a2.download="CAR_合同_"+today+".csv";a2.click();},300);
+  var csv2 = ["编号,类型,金额,分类,日期,合同编号,备注"];
+  _financeRecords.forEach(function(r){csv2.push([r.id,r.type==="income"?"收入":"支出",r.amount,r.category,r.date,r.loanId||"",(r.note||"").replace(/,/g,"；")].join(","));});
+  setTimeout(function(){var a3=document.createElement("a");a3.href=URL.createObjectURL(new Blob(["﻿"+csv2.join("\n")],{type:"text/csv;charset=utf-8"}));a3.download="CAR_财务_"+today+".csv";a3.click();},600);
+  setTimeout(function(){alert("✅ 备份完成！已下载3个文件");},800);
+}
+function doRestore() {
+  var inp=document.createElement("input");inp.type="file";inp.accept=".json";
+  inp.onchange=function(e){
+    var file=e.target.files[0];if(!file)return;
+    var reader=new FileReader();
+    reader.onload=async function(ev){
+      try{
+        var d=JSON.parse(ev.target.result);
+        if(!d.car_loans&&!d.car_finance){alert("❌ 无效备份文件");return;}
+        if(!confirm("确定恢复？将覆盖当前数据\n合同："+((d.car_loans||[]).length)+"条，财务："+((d.car_finance||[]).length)+"条"))return;
+        _loans=d.car_loans||[];_financeRecords=d.car_finance||[];
+        await saveLoans();alert("✅ 恢复成功！");nav("home");
+      }catch(err){alert("❌ 解析失败："+err.message);}
+    };reader.readAsText(file);
+  };inp.click();
+}
+function buildMobNav() {
+  var map={home:"mn_home",add:"mn_add",list:"mn_list",overdue:"mn_overdue"};
+  ["mn_home","mn_add","mn_list","mn_overdue"].forEach(function(id){var el=document.getElementById(id);if(el)el.classList.remove("active");});
+  if(map[_currentNav]){var el=document.getElementById(map[_currentNav]);if(el)el.classList.add("active");}
+}
+function toggleMobMore(){var p=document.getElementById("mobMorePanel");if(p)p.classList.toggle("open");}
+function closeMobMore(){var p=document.getElementById("mobMorePanel");if(p)p.classList.remove("open");}
+
 function setSyncStatus(s) {
   _syncStatus = s;
   var dot = document.getElementById("syncDot");
@@ -188,7 +270,7 @@ async function saveLoans() {
     var res = await fetch("/api/data", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({car_loans:_loans})
+      body:JSON.stringify({car_loans:_loans, car_finance:_financeRecords})
     });
     if(res.ok) setSyncStatus("ok"); else setSyncStatus("error");
   } catch(e) { setSyncStatus("error"); }
@@ -260,6 +342,9 @@ function buildSidebar() {
     {id:"finance_expense", icon:"💸", label:"支出登记"},
     {sec:"风控提醒"},
     {id:"overdue", icon:"⚠️", label:"逾期催收"},
+    {sec:"系统设置"},
+    {id:"backup", icon:"💾", label:"备份数据"},
+    {id:"restore", icon:"📂", label:"恢复数据"},
   ];
   var h = '<div class="sb-logo"><div class="sb-logo-sub">MORODOK</div><div class="sb-logo-name">车贷管理</div></div>';
   for(var i=0;i<items.length;i++) {
@@ -275,7 +360,8 @@ function buildSidebar() {
 
 function nav(page) {
   _currentNav = page;
-  buildSidebar();
+  buildSidebar(); buildMobNav(); closeMobMore();
+  window.scrollTo(0,0);
   document.getElementById("loadingOverlay").classList.remove("show");
   if(page==="home") renderHome();
   else if(page==="add") renderAddForm();
@@ -285,6 +371,8 @@ function nav(page) {
   else if(page==="finance_income") renderFinanceForm("income");
   else if(page==="finance_expense") renderFinanceForm("expense");
   else if(page==="overdue") renderOverdue();
+  else if(page==="backup") { doBackup(); _currentNav="home"; buildSidebar(); buildMobNav(); }
+  else if(page==="restore") { doRestore(); _currentNav="home"; buildSidebar(); buildMobNav(); }
 }
 
 function renderHome() {
@@ -319,6 +407,7 @@ function renderHome() {
   h += '<div class="home-card" onclick="nav(\'finance_income\')"><div class="icon">💵</div><div class="label">收入登记</div><div class="sublabel">记录收款</div></div>';
   h += '<div class="home-card" onclick="nav(\'finance_expense\')"><div class="icon">💸</div><div class="label">支出登记</div><div class="sublabel">记录开支</div></div>';
   h += '<div class="home-card" onclick="nav(\'finance_pnl\')"><div class="icon">📊</div><div class="label">利润表</div><div class="sublabel">财务分析</div></div>';
+  h += '<div class="home-card" onclick="doBackup()" style="border:2px solid #2e7d32"><div class="icon">💾</div><div class="label">备份数据</div><div class="sublabel">下载3个文件</div></div>';
   h += "</div></div>";
 
   h += '<div class="card"><div class="card-header"><div class="card-title">📋 最近贷款记录</div></div>';
@@ -407,26 +496,51 @@ function renderList() {
   h += '<div class="search-row"><input type="text" id="searchInput" placeholder="搜索客户姓名/手机号/车牌..." oninput="filterList()">';
   h += '<select id="statusFilter" onchange="filterList()"><option value="">全部状态</option><option value="active">还款中</option><option value="pending">审核中</option><option value="overdue">已逾期</option><option value="closed">已结清</option></select>';
   h += '<button class="btn btn-success" onclick="nav(\'add\')">➕ 新增贷款</button></div>';
-  h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>手机号</th><th>车牌</th><th>品牌/颜色</th><th>贷款金额</th><th>实际放款</th><th>期限</th><th>月供</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th></tr></thead><tbody id="listBody"></tbody></table></div></div>';
+  if(window.innerWidth<=768){
+    h += '<div id="mobileCardList"></div>';
+  }else{
+    h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>手机号</th><th>车牌</th><th>品牌/颜色</th><th>贷款金额</th><th>实际放款</th><th>期限</th><th>月供</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th></tr></thead><tbody id="listBody"></tbody></table></div></div>';
+  }
   document.getElementById("mainContent").innerHTML = h;
   filterList();
 }
 
 function filterList() {
+  var mobile = window.innerWidth<=768;
   var q = (document.getElementById("searchInput")?.value||"").trim().toLowerCase();
   var s = document.getElementById("statusFilter")?.value||"";
   var filtered = _loans;
-  if(q) filtered = filtered.filter(function(l){ return l.name.indexOf(q)>=0 || l.phone.indexOf(q)>=0 || l.plate.toLowerCase().indexOf(q)>=0; });
+  if(q) filtered = filtered.filter(function(l){ return l.name.indexOf(q)>=0||l.phone.indexOf(q)>=0||l.plate.toLowerCase().indexOf(q)>=0; });
   if(s) filtered = filtered.filter(function(l){ return l.status===s; });
-  var tb = document.getElementById("listBody"); if(!tb) return;
-  if(filtered.length===0) { tb.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--muted)">暂无匹配记录</td></tr>'; return; }
-  var h = "";
-  for(var i=0;i<filtered.length;i++) {
-    var l = filtered[i];
-    h += '<tr><td style="font-weight:600;color:var(--sky)">'+l.id+'</td><td>'+l.name+'</td><td>'+l.phone+'</td><td>'+l.plate+'</td><td>'+(l.brand||"-")+(l.color?' <span style="font-size:11px;color:var(--muted)">'+l.color+'</span>':'')+'</td><td>'+formatMoney(l.amount)+'</td><td style="color:#2e7d32;font-weight:600">'+(l.actualAmount?formatMoney(l.actualAmount):'—')+'</td><td>'+l.term+'期</td><td>'+formatMoney(calcMonthly(l.amount,l.rate,l.term))+'</td><td><span style="font-size:12px;background:#e3f2fd;color:#1565c0;padding:2px 8px;border-radius:10px">'+(l.repay||'等额本息')+'</span></td><td>'+statusHtml(l.status)+'</td><td style="font-size:11px;color:var(--muted)">'+formatDate(l.date)+'</td>';
-    h += '<td><button class="btn btn-sm btn-primary" onclick="editLoan(\''+l.id+'\')">编辑</button> <button class="btn btn-sm btn-danger" onclick="deleteLoan(\''+l.id+'\')">删除</button></td></tr>';
+  if(mobile) {
+    var mc = document.getElementById("mobileCardList"); if(!mc) return;
+    if(filtered.length===0){mc.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">暂无匹配记录</div>';return;}
+    var h="";
+    for(var i=0;i<filtered.length;i++){
+      var l=filtered[i];
+      var sc=l.status==="overdue"?"overdue":l.status==="closed"?"closed":l.status==="pending"?"pending":"";
+      h+='<div class="loan-card '+sc+'">';
+      h+='<div class="loan-card-top"><div><div class="loan-card-name">'+l.name+'</div><div class="loan-card-meta">'+l.id+' · '+formatDate(l.date)+'</div></div>'+statusHtml(l.status)+'</div>';
+      h+='<div class="loan-card-row"><span class="loan-card-lbl">🚗 车牌</span><span class="loan-card-val">'+l.plate+(l.brand?' · '+l.brand:'')+'</span></div>';
+      h+='<div class="loan-card-row"><span class="loan-card-lbl">📱 手机</span><span class="loan-card-val">'+l.phone+'</span></div>';
+      h+='<div class="loan-card-row"><span class="loan-card-lbl">💰 贷款金额</span><span class="loan-card-val" style="color:var(--sky)">'+formatMoney(l.amount)+'</span></div>';
+      h+='<div class="loan-card-row"><span class="loan-card-lbl">💵 月供</span><span class="loan-card-val">'+formatMoney(calcMonthly(l.amount,l.rate,l.term))+' × '+l.term+'期</span></div>';
+      h+='<div class="loan-card-row"><span class="loan-card-lbl">📋 还款方式</span><span class="loan-card-val">'+(l.repay||'等额本息')+'</span></div>';
+      h+='<div class="loan-card-btns"><button class="btn btn-primary" onclick="editLoan(\'"+l.id+"\')">✏️ 编辑</button><button class="btn btn-danger" onclick="deleteLoan(\'"+l.id+"\')">🗑 删除</button></div>';
+      h+='</div>';
+    }
+    mc.innerHTML=h;
+  } else {
+    var tb = document.getElementById("listBody"); if(!tb) return;
+    if(filtered.length===0){tb.innerHTML='<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--muted)">暂无匹配记录</td></tr>';return;}
+    var h="";
+    for(var i=0;i<filtered.length;i++){
+      var l=filtered[i];
+      h+='<tr><td style="font-weight:600;color:var(--sky)">'+l.id+'</td><td>'+l.name+'</td><td>'+l.phone+'</td><td>'+l.plate+'</td><td>'+(l.brand||"-")+(l.color?' <span style="font-size:11px;color:var(--muted)">'+l.color+'</span>':'')+ '</td><td>'+formatMoney(l.amount)+'</td><td style="color:#2e7d32;font-weight:600">'+(l.actualAmount?formatMoney(l.actualAmount):'—')+'</td><td>'+l.term+'期</td><td>'+formatMoney(calcMonthly(l.amount,l.rate,l.term))+'</td><td><span style="font-size:12px;background:#e3f2fd;color:#1565c0;padding:2px 8px;border-radius:10px">'+(l.repay||'等额本息')+'</span></td><td>'+statusHtml(l.status)+'</td><td style="font-size:11px;color:var(--muted)">'+formatDate(l.date)+'</td>';
+      h+='<td><button class="btn btn-sm btn-primary" onclick="editLoan(\'"+l.id+"\')">编辑</button> <button class="btn btn-sm btn-danger" onclick="deleteLoan(\'"+l.id+"\')">删除</button></td></tr>';
+    }
+    tb.innerHTML=h;
   }
-  tb.innerHTML = h;
 }
 
 function editLoan(id) {
@@ -603,7 +717,7 @@ async function initDemoData() {
 }
 
 document.getElementById("dateDisplay").textContent = new Date().toLocaleDateString("zh-CN", {month:"long", day:"numeric", weekday:"short"});
-buildSidebar();
+buildSidebar(); buildMobNav();
 // 从Supabase加载数据后再渲染
 loadAllData().then(function() {
   renderHome();
