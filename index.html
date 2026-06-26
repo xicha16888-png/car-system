@@ -731,46 +731,121 @@ async function deleteFinanceRecord(id) {
 }
 
 function renderFinancePnL() {
-  var totalIncome = _financeRecords.filter(function(r){return r.type==="income"}).reduce(function(s,r){return s+r.amount},0);
-  var totalExpense = _financeRecords.filter(function(r){return r.type==="expense"}).reduce(function(s,r){return s+r.amount},0);
-  var profit = totalIncome - totalExpense;
-  var loanIncome = _loans.reduce(function(s,l){return s+(l.status!=="closed"?calcMonthly(l.amount,l.rate,l.term):0)},0);
-  var incomeByCat = {}; _financeRecords.filter(function(r){return r.type==="income"}).forEach(function(r){ incomeByCat[r.category]=(incomeByCat[r.category]||0)+r.amount; });
-  var expenseByCat = {}; _financeRecords.filter(function(r){return r.type==="expense"}).forEach(function(r){ expenseByCat[r.category]=(expenseByCat[r.category]||0)+r.amount; });
+  var selMonth = document.getElementById('pnlMonth') ? document.getElementById('pnlMonth').value : '';
+  var now = new Date();
+  if(!selMonth) selMonth = now.getFullYear()+'-'+(String(now.getMonth()+1).padStart(2,'0'));
+  function inMonth(d,ym){ return d&&String(d).slice(0,7)===ym; }
 
-  var h = '<div class="page-header"><div class="page-title">📊 利润表</div><div class="page-sub">财务数据概览与分析</div></div>';
-  h += '<div class="stats-grid">';
-  h += '<div class="stat-card green"><div class="stat-icon">💵</div><div class="stat-label">总收入</div><div class="stat-value">'+formatMoney(totalIncome)+'</div><div class="stat-sub">'+_financeRecords.filter(function(r){return r.type==="income"}).length+'笔</div></div>';
-  h += '<div class="stat-card red"><div class="stat-icon">💸</div><div class="stat-label">总支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div><div class="stat-sub">'+_financeRecords.filter(function(r){return r.type==="expense"}).length+'笔</div></div>';
-  h += '<div class="stat-card blue"><div class="stat-icon">📈</div><div class="stat-label">净利润</div><div class="stat-value">'+formatMoney(profit)+'</div><div class="stat-sub">'+(profit>=0?"盈利":"亏损")+'</div></div>';
-  h += '<div class="stat-card amber"><div class="stat-icon">🏦</div><div class="stat-label">月预期收款</div><div class="stat-value">'+formatMoney(loanIncome)+'</div><div class="stat-sub">在贷月供合计</div></div>';
-  h += "</div>";
+  var activeLoans  = _loans.filter(function(l){return l.status==='active';});
+  var overdueLoans = _loans.filter(function(l){return l.status==='overdue';});
+  var closedLoans  = _loans.filter(function(l){return l.status==='closed';});
+  var pendingLoans = _loans.filter(function(l){return l.status==='pending';});
+  var inBetLoans   = _loans.filter(function(l){return l.status==='active'||l.status==='overdue';});
 
-  h += '<div class="card"><div class="card-header"><div class="card-title">💵 收入明细</div></div>';
-  var ik = Object.keys(incomeByCat);
-  if(ik.length===0) { h += '<div style="padding:20px;color:var(--muted)">暂无收入记录</div>'; }
-  else {
-    h += '<div class="table-wrap"><table><thead><tr><th>收入分类</th><th>金额</th><th>占比</th></tr></thead><tbody>';
-    for(var k in incomeByCat) { var pct=totalIncome>0?Math.round(incomeByCat[k]/totalIncome*100):0; h += '<tr><td>'+k+'</td><td style="font-weight:600;color:var(--green)">'+formatMoney(incomeByCat[k])+'</td><td>'+pct+'%</td></tr>'; }
-    h += '<tr style="font-weight:700;background:#f8fff8"><td>合计</td><td style="color:var(--green)">'+formatMoney(totalIncome)+'</td><td>100%</td></tr>';
-    h += "</tbody></table></div>";
+  var totalPrincipal = inBetLoans.reduce(function(s,l){return s+l.amount;},0);
+  var monthNewLoans  = _loans.filter(function(l){return inMonth(l.date,selMonth);});
+  var monthNewAmount = monthNewLoans.reduce(function(s,l){return s+l.amount;},0);
+  var monthNewActual = monthNewLoans.reduce(function(s,l){return s+(l.actualAmount||l.amount*(1-(l.haircut||9.5)/100));},0);
+  var monthHaircut   = monthNewLoans.reduce(function(s,l){return s+l.amount*(l.haircut||9.5)/100;},0);
+  var monthIntDue    = inBetLoans.reduce(function(s,l){return s+l.amount*(l.rate||0)/100;},0);
+  var recInc  = _financeRecords.filter(function(r){return r.type==='income' && inMonth(r.date,selMonth);});
+  var recExp  = _financeRecords.filter(function(r){return r.type==='expense'&& inMonth(r.date,selMonth);});
+  var manInc  = recInc.reduce(function(s,r){return s+r.amount;},0);
+  var manExp  = recExp.reduce(function(s,r){return s+r.amount;},0);
+  var incByCat={}, expByCat={};
+  recInc.forEach(function(r){incByCat[r.category]=(incByCat[r.category]||0)+r.amount;});
+  recExp.forEach(function(r){expByCat[r.category]=(expByCat[r.category]||0)+r.amount;});
+  var netProfit = monthHaircut + manInc - manExp;
+  var totalLoansActive = _loans.filter(function(l){return l.status!=='pending';}).length;
+  var overdueRate = totalLoansActive>0 ? (overdueLoans.length/totalLoansActive*100).toFixed(1) : 0;
+  var grandTotal = _loans.reduce(function(s,l){return s+l.amount;},0);
+
+  var months=[];
+  for(var mi=0;mi<8;mi++){
+    var md=new Date(now.getFullYear(),now.getMonth()-mi,1);
+    months.push(md.getFullYear()+'-'+String(md.getMonth()+1).padStart(2,'0'));
   }
-  h += "</div>";
 
-  h += '<div class="card"><div class="card-header"><div class="card-title">💸 支出明细</div></div>';
-  var ek = Object.keys(expenseByCat);
-  if(ek.length===0) { h += '<div style="padding:20px;color:var(--muted)">暂无支出记录</div>'; }
-  else {
-    h += '<div class="table-wrap"><table><thead><tr><th>支出分类</th><th>金额</th><th>占比</th></tr></thead><tbody>';
-    for(var k in expenseByCat) { var pct=totalExpense>0?Math.round(expenseByCat[k]/totalExpense*100):0; h += '<tr><td>'+k+'</td><td style="font-weight:600;color:var(--red)">'+formatMoney(expenseByCat[k])+'</td><td>'+pct+'%</td></tr>'; }
-    h += '<tr style="font-weight:700;background:#fff8f8"><td>合计</td><td style="color:var(--red)">'+formatMoney(totalExpense)+'</td><td>100%</td></tr>';
-    h += "</tbody></table></div>";
+  var h='';
+  h+='<div class="page-header"><div class="page-title">📊 专业利润表</div>';
+  h+='<div class="page-sub">数据自动归集 · 实时更新</div></div>';
+
+  h+='<div class="search-row" style="margin-bottom:14px"><select id="pnlMonth" onchange="renderFinancePnL()">';
+  months.forEach(function(m){h+='<option value="'+m+'"'+(m===selMonth?' selected':'')+'>'+m+'</option>';});
+  h+='</select></div>';
+
+  h+='<div style="margin-bottom:10px;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px">▌ 资产规模</div>';
+  h+='<div class="stats-grid" style="margin-bottom:18px">';
+  h+='<div class="stat-card blue"><div class="stat-icon">🏦</div><div class="stat-label">在贷本金总额</div><div class="stat-value" style="font-size:18px">$'+totalPrincipal.toLocaleString()+'</div><div class="stat-sub">共'+(activeLoans.length+overdueLoans.length)+'笔在贷</div></div>';
+  h+='<div class="stat-card green"><div class="stat-icon">📤</div><div class="stat-label">本月新放款</div><div class="stat-value" style="font-size:18px">$'+monthNewAmount.toLocaleString()+'</div><div class="stat-sub">'+monthNewLoans.length+'笔 · 实际$'+Math.round(monthNewActual).toLocaleString()+'</div></div>';
+  h+='<div class="stat-card amber"><div class="stat-icon">💰</div><div class="stat-label">月应收利息</div><div class="stat-value" style="font-size:18px">$'+monthIntDue.toFixed(0)+'</div><div class="stat-sub">在贷+逾期合同</div></div>';
+  h+='<div class="stat-card '+(overdueRate>10?'red':'purple')+'"><div class="stat-icon">⚠️</div><div class="stat-label">逾期率</div><div class="stat-value" style="font-size:18px">'+overdueRate+'%</div><div class="stat-sub">'+overdueLoans.length+'笔逾期</div></div>';
+  h+='</div>';
+
+  // 损益表
+  h+='<div class="card">';
+  h+='<div class="card-title" style="margin-bottom:16px">📋 '+selMonth+' 损益表</div>';
+
+  function row(label,amount,color,indent,bold){
+    var bg=bold?'background:#fafafa;':'';
+    var fw=bold?'font-weight:700;':'';
+    var pl=indent?'padding-left:24px;':'';
+    var lc=indent?'color:var(--muted)':'color:var(--text)';
+    var fs=bold?'font-size:15px':'font-size:13px';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 8px;border-bottom:1px solid #f5f5f5;'+fw+bg+pl+'">'+
+           '<span style="font-size:13px;'+lc+'">'+label+'</span>'+
+           '<span style="font-weight:600;color:'+(color||'var(--text)')+';'+fs+'">$'+amount.toFixed(2)+'</span></div>';
   }
-  h += "</div>";
-  h += '<div class="btn-row"><button class="btn btn-primary" onclick="nav(\'finance_income\')">💵 新增收入</button>';
-  h += '<button class="btn btn-danger" onclick="nav(\'finance_expense\')">💸 新增支出</button>';
-  h += '<button class="btn btn-outline" onclick="nav(\'finance_cashflow\')">💰 现金流</button></div>';
-  document.getElementById("mainContent").innerHTML = h;
+  function sec(label){
+    return '<div style="padding:10px 8px 4px;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:1px;border-top:2px solid #e0e0e0;margin-top:4px">'+label+'</div>';
+  }
+
+  h+=sec('▌ 一、营业收入');
+  h+=row('砍头息收入（本月新放款自动归集）',monthHaircut,'#2e7d32',true,false);
+  for(var k in incByCat) h+=row(k,incByCat[k],'#2e7d32',true,false);
+  h+=row('营业收入合计',monthHaircut+manInc,'#1565c0',false,true);
+
+  h+=sec('▌ 二、应收利息（参考，未计入损益）');
+  h+=row('本月应收利息（在贷合同）',monthIntDue,'#f57c00',true,false);
+  h+='<div style="padding:4px 8px 10px 24px;font-size:11px;color:var(--muted)">※ 实际收到后请在"录入收入"里登记，方可计入损益</div>';
+
+  h+=sec('▌ 三、营业成本与支出');
+  var hasExp=false;
+  for(var k in expByCat){h+=row(k,expByCat[k],'#c62828',true,false);hasExp=true;}
+  if(!hasExp) h+='<div style="padding:8px 8px 8px 24px;font-size:12px;color:var(--muted)">本月暂无支出记录 — 请在"录入支出"添加</div>';
+  h+=row('营业成本合计',manExp,'#c62828',false,true);
+
+  h+=sec('▌ 四、净利润');
+  h+=row('净利润（营业收入 − 营业成本）',netProfit,netProfit>=0?'#2e7d32':'#c62828',false,true);
+  h+='<div style="padding:6px 8px 14px;font-size:11px;color:var(--muted)">※ 净利润 = 砍头息 + 手动录入收入 − 手动录入支出</div>';
+  h+='</div>';
+
+  // 贷款组合
+  h+='<div class="card"><div class="card-title" style="margin-bottom:14px">📈 贷款组合状态</div>';
+  h+='<div class="table-wrap"><table><thead><tr><th>状态</th><th>笔数</th><th>本金合计</th><th>占比</th></tr></thead><tbody>';
+  var groups=[
+    {label:'还款中',list:activeLoans,color:'#2e7d32'},
+    {label:'逾期',list:overdueLoans,color:'#c62828'},
+    {label:'审核中',list:pendingLoans,color:'#f57c00'},
+    {label:'已结清',list:closedLoans,color:'#9e9e9e'}
+  ];
+  groups.forEach(function(g){
+    var amt=g.list.reduce(function(s,l){return s+l.amount;},0);
+    var pct=grandTotal>0?(amt/grandTotal*100).toFixed(1):0;
+    h+='<tr><td style="font-weight:600;color:'+g.color+'">'+g.label+'</td><td>'+g.list.length+'笔</td><td style="font-weight:600">$'+amt.toLocaleString()+'</td><td>'+pct+'%</td></tr>';
+  });
+  h+='<tr style="font-weight:700;background:#f5f5f5"><td>合计</td><td>'+_loans.length+'笔</td><td>$'+grandTotal.toLocaleString()+'</td><td>100%</td></tr>';
+  h+='</tbody></table></div></div>';
+
+  h+='<div class="btn-row">';
+  h+='<button class="btn btn-primary" onclick="nav(\'finance_income\')">💵 录入收入</button>';
+  h+='<button class="btn btn-danger" onclick="nav(\'finance_expense\')">💸 录入支出</button>';
+  h+='<button class="btn btn-outline" onclick="nav(\'finance_cashflow\')">💰 现金流水</button>';
+  h+='</div>';
+
+  document.getElementById('mainContent').innerHTML = h;
+  var sel=document.getElementById('pnlMonth');
+  if(sel) sel.value=selMonth;
 }
 
 function renderCashFlow() {
