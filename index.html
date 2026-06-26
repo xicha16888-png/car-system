@@ -303,10 +303,63 @@ async function loadAllData() {
 function formatDate(d) { if(!d) return "-"; var dt=new Date(d); return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0"); }
 function formatMoney(n) { return "¥"+Number(n).toLocaleString(); }
 
-function calcMonthly(amount, rate, term) {
-  var r = rate / 100;
-  if(r === 0) return Math.round(amount / term);
-  return Math.round(amount * r * Math.pow(1+r, term) / (Math.pow(1+r, term) - 1));
+// ══ 三种还款方式计算引擎 ══
+function calcRepay(amount, rate, term, repay, haircut) {
+  // amount: 贷款金额(合同面值), rate: 月利率%, term: 期数, repay: 还款方式, haircut: 砍头比例%
+  var r = (rate||0) / 100;
+  var hc = (haircut||0) / 100;
+  var actual = amount * (1 - hc); // 实际放款
+  var res = { actual: Math.round(actual*100)/100, monthly:0, totalRepay:0, totalInterest:0, schedule:[] };
+  if(repay === "先息后本") {
+    // 每期只还利息，最后一期还本金+利息
+    var interest = Math.round(amount * r * 100) / 100;
+    res.monthly = interest;
+    res.totalInterest = Math.round(amount * r * term * 100) / 100;
+    res.totalRepay = Math.round((amount + res.totalInterest) * 100) / 100;
+    for(var i=1;i<=term;i++) {
+      res.schedule.push({ period:i, principal: i===term ? amount : 0, interest: interest, total: i===term ? amount+interest : interest });
+    }
+  } else if(repay === "永续贷") {
+    // 只还利息，本金不动
+    var interest = Math.round(amount * r * 100) / 100;
+    res.monthly = interest;
+    res.totalInterest = Math.round(amount * r * term * 100) / 100;
+    res.totalRepay = Math.round((amount + res.totalInterest) * 100) / 100;
+    for(var i=1;i<=term;i++) {
+      res.schedule.push({ period:i, principal: i===term ? amount : 0, interest: interest, total: i===term ? amount+interest : interest, note: i===term?'':'利息' });
+    }
+  } else {
+    // 等额本息（默认）: 每期还固定金额(本+息)
+    if(r === 0) {
+      var p = Math.round(amount/term*100)/100;
+      res.monthly = p;
+      res.totalRepay = amount;
+      res.totalInterest = 0;
+      for(var i=1;i<=term;i++) res.schedule.push({period:i,principal:p,interest:0,total:p});
+    } else {
+      var monthly = amount * r * Math.pow(1+r,term) / (Math.pow(1+r,term)-1);
+      monthly = Math.round(monthly*100)/100;
+      res.monthly = monthly;
+      var remain = amount;
+      var totalInt = 0;
+      for(var i=1;i<=term;i++) {
+        var intPart = Math.round(remain * r * 100) / 100;
+        var prinPart = Math.round((monthly - intPart) * 100) / 100;
+        if(i===term) prinPart = Math.round(remain*100)/100; // 最后一期还清余额
+        totalInt += intPart;
+        remain -= prinPart;
+        res.schedule.push({period:i, principal:prinPart, interest:intPart, total:Math.round((prinPart+intPart)*100)/100});
+      }
+      res.totalInterest = Math.round(totalInt*100)/100;
+      res.totalRepay = Math.round((amount+totalInt)*100)/100;
+    }
+  }
+  return res;
+}
+// 兼容旧调用
+function calcMonthly(amount, rate, term, repay) {
+  var res = calcRepay(amount, rate||0, term||1, repay||"等额本息", 0);
+  return res.monthly;
 }
 
 function statusHtml(s) {
@@ -425,34 +478,86 @@ function renderHome() {
   document.getElementById("mainContent").innerHTML = h;
 }
 
+function calcPreview() {
+  var amount = parseFloat(document.getElementById("f_amount")?.value)||0;
+  var rate   = parseFloat(document.getElementById("f_rate")?.value)||0;
+  var term   = parseInt(document.getElementById("f_term")?.value)||1;
+  var repay  = document.getElementById("f_repay")?.value||"等额本息";
+  var haircut= parseFloat(document.getElementById("f_haircut")?.value)||0;
+  var box = document.getElementById("calcPreviewBox"); if(!box) return;
+  if(!amount||!rate) { box.style.display="none"; return; }
+  var res = calcRepay(amount, rate, term, repay, haircut);
+  // 自动填实际放款
+  var actEl = document.getElementById("f_actual_amount");
+  if(actEl && !actEl._manualEdit) actEl.value = res.actual;
+  // 渲染预览
+  var modeLabel = repay==="永续贷"?"每月利息":repay==="先息后本"?"每月利息（最后一期还本）":"每月还款（本+息）";
+  var scheduleRows = "";
+  for(var i=0;i<res.schedule.length;i++) {
+    var s = res.schedule[i];
+    scheduleRows += "<tr><td>第"+s.period+"期</td><td>$"+s.principal.toFixed(2)+"</td><td>$"+s.interest.toFixed(2)+"</td><td style=\"font-weight:600\">$"+s.total.toFixed(2)+"</td></tr>";
+  }
+  box.style.display="block";
+  box.innerHTML =
+    "<div style=\"display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px\">" +
+    "<div style=\"background:#e3f2fd;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">实际放款</div><div style=\"font-size:18px;font-weight:700;color:#1565c0\">$"+res.actual.toFixed(2)+"</div></div>" +
+    "<div style=\"background:#e8f5e9;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">"+modeLabel+"</div><div style=\"font-size:18px;font-weight:700;color:#2e7d32\">$"+res.monthly.toFixed(2)+"</div></div>" +
+    "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">总利息</div><div style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+res.totalInterest.toFixed(2)+"</div></div>" +
+    "<div style=\"background:#fce4ec;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">应总还款</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">$"+res.totalRepay.toFixed(2)+"</div></div>" +
+    "</div>" +
+    "<div style=\"overflow-x:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><thead><tr style=\"background:#f5f5f5\"><th style=\"padding:6px 8px;text-align:left\">期数</th><th style=\"padding:6px 8px;text-align:left\">本金</th><th style=\"padding:6px 8px;text-align:left\">利息</th><th style=\"padding:6px 8px;text-align:left\">合计</th></tr></thead><tbody>" +
+    scheduleRows + "</tbody></table></div>";
+}
+
 function renderAddForm(data) {
   var isEdit = !!data;
   var d = data || {};
   var h = "";
-  h += '<div class="page-header"><div class="page-title">'+(isEdit?"✏️ ":"➕ ")+(isEdit?"编辑贷款":"新增贷款")+'</div><div class="page-sub">'+(isEdit?"修改贷款信息":"录入新的汽车抵押贷款合同")+'</div></div>';
-  h += '<div class="card"><div class="form-grid">';
-  h += '<div class="form-group"><label>客户姓名 *</label><input type="text" id="f_name" value="'+(d.name||"")+'" placeholder="请输入姓名"></div>';
-  h += '<div class="form-group"><label>手机号 *</label><input type="text" id="f_phone" value="'+(d.phone||"")+'" placeholder="请输入手机号"></div>';
-  h += '<div class="form-group"><label>身份证号</label><input type="text" id="f_idcard" value="'+(d.idcard||"")+'" placeholder="可选"></div>';
-  h += '<div class="form-group"><label>车牌号 *</label><input type="text" id="f_plate" value="'+(d.plate||"")+'" placeholder="如：京A88888"></div>';
-  h += '<div class="form-group"><label>车辆品牌</label><input type="text" id="f_brand" value="'+(d.brand||"")+'" placeholder="如：宝马、丰田"></div>';
-  h += '<div class="form-group"><label>车辆型号</label><input type="text" id="f_model" value="'+(d.model||"")+'" placeholder="如：X5 2022款"></div>';
-  h += '<div class="form-group"><label>车辆颜色</label><input type="text" id="f_color" value="'+(d.color||"")+'" placeholder="如：白色、黑色、银色"></div>';
-  h += '<div class="form-group"><label>评估价值（万元）</label><input type="number" id="f_estimate" value="'+(d.estimate||"")+'" placeholder="0" step="0.1"></div>';
-  h += '<div class="form-group"><label>贷款金额（元）*</label><input type="number" id="f_amount" value="'+(d.amount||"")+'" placeholder="0" min="0"></div>';
-  h += '<div class="form-group"><label>实际放款金额（元）</label><input type="number" id="f_actual_amount" value="'+(d.actualAmount||"")+'" placeholder="扣除手续费后实际到手金额" min="0" style="border-color:#2e7d32"></div>';
-  h += '<div class="form-group"><label>贷款期限</label><select id="f_term"><option value="3"'+(d.term==3?" selected":"")+'>3期</option><option value="6"'+(d.term==6?" selected":"")+'>6期</option><option value="12"'+(d.term==12||!d.term?" selected":"")+'>12期</option><option value="24"'+(d.term==24?" selected":"")+'>24期</option><option value="36"'+(d.term==36?" selected":"")+'>36期</option></select></div>';
-  h += '<div class="form-group"><label>月利率（%）</label><input type="number" id="f_rate" value="'+(d.rate!==undefined?d.rate:"0.8")+'" step="0.1" min="0" max="5"></div>';
-  h += '<div class="form-group"><label>还款方式</label><select id="f_repay"><option value="等额本息"'+(d.repay=="等额本息"||!d.repay?" selected":"")+'>等额本息</option><option value="先息后本"'+(d.repay=="先息后本"?" selected":"")+'>先息后本</option><option value="永续贷"'+(d.repay=="永续贷"?" selected":"")+'>永续贷</option></select></div>';
-  h += '<div class="form-group"><label>状态</label><select id="f_status"><option value="pending"'+(d.status=="pending"||!d.status?" selected":"")+'>审核中</option><option value="active"'+(d.status=="active"?" selected":"")+'>还款中</option><option value="overdue"'+(d.status=="overdue"?" selected":"")+'>已逾期</option><option value="closed"'+(d.status=="closed"?" selected":"")+'>已结清</option></select></div>';
-  h += '<div class="form-group"><label>放款日期</label><input type="date" id="f_date" value="'+(d.date||new Date().toISOString().slice(0,10))+'"></div>';
-  h += '<div class="form-group span3"><label>备注</label><textarea id="f_note" placeholder="其他需要记录的信息...">'+(d.note||"")+'</textarea></div>';
+  h += "<div class=\"page-header\"><div class=\"page-title\">"+(isEdit?"✏️ ":"➕ ")+(isEdit?"编辑贷款":"新增贷款")+"</div><div class=\"page-sub\">"+(isEdit?"修改贷款信息":"录入新的汽车抵押贷款合同")+"</div></div>";
+  // 客户信息
+  h += "<div class=\"card\"><div class=\"card-title\" style=\"margin-bottom:12px\">👤 客户信息</div><div class=\"form-grid\">";
+  h += "<div class=\"form-group\"><label>客户姓名 *</label><input type=\"text\" id=\"f_name\" value=\""+(d.name||"")+"\" placeholder=\"请输入姓名\"></div>";
+  h += "<div class=\"form-group\"><label>手机号 *</label><input type=\"text\" id=\"f_phone\" value=\""+(d.phone||"")+"\" placeholder=\"请输入手机号\"></div>";
+  h += "<div class=\"form-group\"><label>身份证号</label><input type=\"text\" id=\"f_idcard\" value=\""+(d.idcard||"")+"\" placeholder=\"可选\"></div>";
   h += "</div></div>";
-  h += '<div class="btn-row"><button class="btn btn-primary" onclick="saveLoan()">✅ 保存</button>';
-  h += '<button class="btn btn-outline" onclick="nav(\'list\')">📋 查看列表</button>';
-  if(isEdit) h += '<button class="btn btn-outline" onclick="nav(\'list\')">取消</button>';
+  // 车辆信息
+  h += "<div class=\"card\"><div class=\"card-title\" style=\"margin-bottom:12px\">🚗 车辆信息</div><div class=\"form-grid\">";
+  h += "<div class=\"form-group\"><label>车牌号 *</label><input type=\"text\" id=\"f_plate\" value=\""+(d.plate||"")+"\" placeholder=\"如：2AB-1234\"></div>";
+  h += "<div class=\"form-group\"><label>车辆品牌</label><input type=\"text\" id=\"f_brand\" value=\""+(d.brand||"")+"\" placeholder=\"如：Toyota\"></div>";
+  h += "<div class=\"form-group\"><label>车辆型号</label><input type=\"text\" id=\"f_model\" value=\""+(d.model||"")+"\" placeholder=\"如：Prius 2022\"></div>";
+  h += "<div class=\"form-group\"><label>车辆颜色</label><input type=\"text\" id=\"f_color\" value=\""+(d.color||"")+"\" placeholder=\"如：白色\"></div>";
+  h += "<div class=\"form-group\"><label>评估价值（$）</label><input type=\"number\" id=\"f_estimate\" value=\""+(d.estimate||"")+"\" placeholder=\"0\" step=\"0.01\"></div>";
+  h += "</div></div>";
+  // 贷款设置 + 实时计算
+  h += "<div class=\"card\"><div class=\"card-title\" style=\"margin-bottom:12px\">💰 贷款设置</div><div class=\"form-grid\">";
+  h += "<div class=\"form-group\"><label>贷款金额（$）*</label><input type=\"number\" id=\"f_amount\" value=\""+(d.amount||"")+"\" placeholder=\"0\" min=\"0\" oninput=\"calcPreview()\"></div>";
+  h += "<div class=\"form-group\"><label>砍头比例（%）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">实际放款 = 贷款×(1−砍头%)</span></label><input type=\"number\" id=\"f_haircut\" value=\""+(d.haircut!==undefined?d.haircut:"9.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"calcPreview()\"></div>";
+  h += "<div class=\"form-group\"><label>实际放款（$）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">可手动覆盖</span></label><input type=\"number\" id=\"f_actual_amount\" value=\""+(d.actualAmount||"")+"\" placeholder=\"自动计算\" min=\"0\" style=\"border-color:#2e7d32\" oninput=\"this._manualEdit=true\"></div>";
+  h += "<div class=\"form-group\"><label>月利率（%）</label><input type=\"number\" id=\"f_rate\" value=\""+(d.rate!==undefined?d.rate:"1.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"calcPreview()\"></div>";
+  h += "<div class=\"form-group\"><label>贷款期限</label><select id=\"f_term\" onchange=\"calcPreview()\">";
+  [1,2,3,4,5,6,9,12,18,24,36].forEach(function(v){ h += "<option value=\""+v+"\""+((d.term==v||(v==3&&!d.term))?" selected":"")+">"+v+"期</option>"; });
+  h += "</select></div>";
+  h += "<div class=\"form-group\"><label>还款方式</label><select id=\"f_repay\" onchange=\"calcPreview()\">";
+  ["先息后本","等额本息","永续贷"].forEach(function(v){ h += "<option value=\""+v+"\""+((d.repay===v||(v==="先息后本"&&!d.repay))?" selected":"")+">"+v+"</option>"; });
+  h += "</select></div>";
+  h += "<div class=\"form-group\"><label>状态</label><select id=\"f_status\">";
+  [{v:"pending",l:"审核中"},{v:"active",l:"还款中"},{v:"overdue",l:"已逾期"},{v:"closed",l:"已结清"}].forEach(function(o){ h += "<option value=\""+o.v+"\""+((d.status===o.v||(o.v==="pending"&&!d.status))?" selected":"")+">"+o.l+"</option>"; });
+  h += "</select></div>";
+  h += "<div class=\"form-group\"><label>放款日期</label><input type=\"date\" id=\"f_date\" value=\""+(d.date||new Date().toISOString().slice(0,10))+"\" ></div>";
+  h += "<div class=\"form-group span3\"><label>备注</label><textarea id=\"f_note\" placeholder=\"其他需要记录的信息...\">"+(d.note||"")+"</textarea></div>";
+  h += "</div>";
+  // 实时预览区
+  h += "<div id=\"calcPreviewBox\" style=\"display:none;margin-top:14px;padding:14px;background:#f8f9fa;border-radius:10px;border:1px solid #e0e0e0\"><div style=\"font-size:12px;font-weight:700;color:var(--navy);margin-bottom:10px\">📊 还款计划预览</div></div>";
+  h += "</div>";
+  h += "<div class=\"btn-row\"><button class=\"btn btn-primary\" onclick=\"saveLoan()\">✅ 保存合同</button>";
+  h += "<button class=\"btn btn-outline\" onclick=\"nav(\'list\')\" >📋 查看列表</button>";
+  if(isEdit) h += "<button class=\"btn btn-outline\" onclick=\"nav(\'list\')\" >取消</button>";
   h += "</div>";
   document.getElementById("mainContent").innerHTML = h;
+  // 绑定手动覆盖检测
+  var actEl = document.getElementById("f_actual_amount");
+  if(actEl) actEl._manualEdit = !!d.actualAmount;
+  setTimeout(calcPreview, 50);
 }
 
 async function saveLoan() {
@@ -464,18 +569,30 @@ async function saveLoan() {
   if(!phone) { alert("请输入手机号"); return; }
   if(!plate) { alert("请输入车牌号"); return; }
   if(!amount || amount<=0) { alert("请输入有效的贷款金额"); return; }
+  var haircut = parseFloat(document.getElementById("f_haircut")?.value)||0;
+  var repay = document.getElementById("f_repay")?.value||"先息后本";
+  var rate = parseFloat(document.getElementById("f_rate")?.value)||0;
+  var term = parseInt(document.getElementById("f_term")?.value)||3;
+  var res = calcRepay(amount, rate, term, repay, haircut);
+  var actualAmountEl = document.getElementById("f_actual_amount");
+  var actualAmount = parseFloat(actualAmountEl?.value)||res.actual;
   var data = {
     name:name, phone:phone, plate:plate,
     idcard:document.getElementById("f_idcard")?.value.trim()||"",
     brand:document.getElementById("f_brand")?.value.trim()||"",
     color:document.getElementById("f_color")?.value.trim()||"",
-    actualAmount:parseFloat(document.getElementById("f_actual_amount")?.value)||0,
     model:document.getElementById("f_model")?.value.trim()||"",
     estimate:parseFloat(document.getElementById("f_estimate")?.value)||0,
     amount:amount,
-    term:parseInt(document.getElementById("f_term")?.value)||12,
-    rate:parseFloat(document.getElementById("f_rate")?.value)||0,
-    repay:document.getElementById("f_repay")?.value||"等额本息",
+    actualAmount:actualAmount,
+    haircut:haircut,
+    rate:rate,
+    term:term,
+    repay:repay,
+    monthly:res.monthly,
+    totalRepay:res.totalRepay,
+    totalInterest:res.totalInterest,
+    schedule:res.schedule,
     status:document.getElementById("f_status")?.value||"pending",
     date:document.getElementById("f_date")?.value||new Date().toISOString().slice(0,10),
     note:document.getElementById("f_note")?.value.trim()||""
@@ -524,7 +641,7 @@ function filterList() {
       h+='<div class="loan-card-row"><span class="loan-card-lbl">🚗 车牌</span><span class="loan-card-val">'+l.plate+(l.brand?' · '+l.brand:'')+'</span></div>';
       h+='<div class="loan-card-row"><span class="loan-card-lbl">📱 手机</span><span class="loan-card-val">'+l.phone+'</span></div>';
       h+='<div class="loan-card-row"><span class="loan-card-lbl">💰 贷款金额</span><span class="loan-card-val" style="color:var(--sky)">'+formatMoney(l.amount)+'</span></div>';
-      h+='<div class="loan-card-row"><span class="loan-card-lbl">💵 月供</span><span class="loan-card-val">'+formatMoney(calcMonthly(l.amount,l.rate,l.term))+' × '+l.term+'期</span></div>';
+      h+='<div class="loan-card-row"><span class="loan-card-lbl">💵 月供</span><span class="loan-card-val">'+(l.repay==="永续贷"||l.repay==="先息后本"?'$'+(l.monthly||calcMonthly(l.amount,l.rate,l.term)).toFixed(2)+'/月息':formatMoney(l.monthly||calcMonthly(l.amount,l.rate,l.term)))+' × '+l.term+'期</span></div>';
       h+='<div class="loan-card-row"><span class="loan-card-lbl">📋 还款方式</span><span class="loan-card-val">'+(l.repay||'等额本息')+'</span></div>';
       h+='<div class="loan-card-btns"><button class="btn btn-primary" onclick="editLoan(\'"+l.id+"\')">✏️ 编辑</button><button class="btn btn-danger" onclick="deleteLoan(\'"+l.id+"\')">🗑 删除</button></div>';
       h+='</div>';
