@@ -483,13 +483,23 @@ function calcPreview() {
   var rate   = parseFloat(document.getElementById("f_rate")?.value)||0;
   var term   = parseInt(document.getElementById("f_term")?.value)||1;
   var repay  = document.getElementById("f_repay")?.value||"等额本息";
-  var haircut= parseFloat(document.getElementById("f_haircut")?.value)||0;
-  var box = document.getElementById("calcPreviewBox"); if(!box) return;
-  if(!amount||!rate) { box.style.display="none"; return; }
-  var res = calcRepay(amount, rate, term, repay, haircut);
-  // 自动填实际放款
+  var box    = document.getElementById("calcPreviewBox"); if(!box) return;
+  // ══ 双向联动：先算砍头/实际放款，再判断是否显示预览 ══
   var actEl = document.getElementById("f_actual_amount");
-  // (联动逻辑已在上方处理)
+  var hcEl  = document.getElementById("f_haircut");
+  var haircut, actual;
+  if(window._lastEdit === "actual" && actEl && actEl.value !== "" && amount > 0) {
+    actual  = parseFloat(actEl.value) || 0;
+    haircut = actual > 0 ? Math.round((1 - actual/amount)*10000)/100 : 0;
+    if(hcEl) hcEl.value = haircut.toFixed(2);
+  } else {
+    haircut = parseFloat(hcEl?.value) || 0;
+    actual  = Math.round(amount * (1 - haircut/100) * 100) / 100;
+    if(actEl && amount > 0) actEl.value = actual || "";
+  }
+  if(!amount || !rate) { box.style.display="none"; return; }
+  var res = calcRepay(amount, rate, term, repay, haircut);
+  res.actual = actual;
   // 渲染预览
   var modeLabel = repay==="永续贷"?"每月利息":repay==="先息后本"?"每月利息（最后一期还本）":"每月还款（本+息）";
   var scheduleRows = "";
