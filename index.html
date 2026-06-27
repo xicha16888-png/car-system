@@ -531,9 +531,9 @@ function renderAddForm(data) {
   // 贷款设置 + 实时计算
   h += "<div class=\"card\"><div class=\"card-title\" style=\"margin-bottom:12px\">💰 贷款设置</div><div class=\"form-grid\">";
   h += "<div class=\"form-group\"><label>贷款金额（$）*</label><input type=\"number\" id=\"f_amount\" value=\""+(d.amount||"")+"\" placeholder=\"0\" min=\"0\" oninput=\"calcPreview()\"></div>";
-  h += "<div class=\"form-group\"><label>砍头比例（%）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">实际放款 = 贷款×(1−砍头%)</span></label><input type=\"number\" id=\"f_haircut\" value=\""+(d.haircut!==undefined?d.haircut:"9.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"calcPreview()\"></div>";
+  h += "<div class=\"form-group\"><label>砍头比例（%）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">实际放款 = 贷款×(1−砍头%)</span></label><input type=\"number\" id=\"f_haircut\" value=\""+(d.haircut!==undefined?d.haircut:"9.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"window._lastHaircutEdit='haircut';calcPreview()\"></div>";
   h += "<div class=\"form-group\"><label>实际放款（$）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">可手动覆盖</span></label><input type=\"number\" id=\"f_actual_amount\" value=\""+(d.actualAmount||"")+"\" placeholder=\"自动计算\" min=\"0\" style=\"border-color:#2e7d32\" oninput=\"this._manualEdit=true\"></div>";
-  h += "<div class=\"form-group\"><label>月利率（%）</label><input type=\"number\" id=\"f_rate\" value=\""+(d.rate!==undefined?d.rate:"1.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"calcPreview()\"></div>";
+  h += "<div class=\"form-group\"><label>月利率（%）</label><input type=\"number\" id=\"f_rate\" value=\""+(d.rate!==undefined?d.rate:"1.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"window._lastHaircutEdit='haircut';calcPreview()\"></div>";
   h += "<div class=\"form-group\"><label>贷款期限</label><select id=\"f_term\" onchange=\"calcPreview()\">";
   [1,2,3,4,5,6,9,12,18,24,36].forEach(function(v){ h += "<option value=\""+v+"\""+((d.term==v||(v==3&&!d.term))?" selected":"")+">"+v+"期</option>"; });
   h += "</select></div>";
@@ -555,8 +555,7 @@ function renderAddForm(data) {
   h += "</div>";
   document.getElementById("mainContent").innerHTML = h;
   // 绑定手动覆盖检测
-  var actEl = document.getElementById("f_actual_amount");
-  if(actEl) actEl._manualEdit = !!d.actualAmount;
+  window._lastHaircutEdit = d.actualAmount ? "actual" : "haircut";
   setTimeout(calcPreview, 50);
 }
 
