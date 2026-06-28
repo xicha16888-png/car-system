@@ -161,6 +161,7 @@ html,body{overflow:auto;height:auto}
 .page-title{font-size:15px}
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 <div class="header">
@@ -252,6 +253,164 @@ function buildMobNav() {
 }
 function toggleMobMore(){var p=document.getElementById("mobMorePanel");if(p)p.classList.toggle("open");}
 function closeMobMore(){var p=document.getElementById("mobMorePanel");if(p)p.classList.remove("open");}
+
+
+// ══ 批量导入 ══
+function renderImport() {
+  var h='';
+  h+='<div class="page-header"><div class="page-title">📥 批量导入</div>';
+  h+='<div class="page-sub">从永续贷Excel表格批量导入进行中汽车合同</div></div>';
+  h+='<div class="card">';
+  h+='<div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:12px">📊 上传永续贷Excel表格</div>';
+  h+='<div id="importDrop" onclick="document.getElementById(\'importFile\').click()" ondragover="event.preventDefault();this.style.borderColor=\'#1565c0\'" ondragleave="this.style.borderColor=\'#cfd8dc\'" ondrop="handleImportDrop(event)" style="border:2px dashed #cfd8dc;border-radius:10px;padding:40px;text-align:center;cursor:pointer">';
+  h+='<div style="font-size:40px;margin-bottom:8px">📊</div>';
+  h+='<div style="font-size:14px;font-weight:600;color:var(--navy)">点击上传 或 拖拽Excel文件</div>';
+  h+='<div style="font-size:12px;color:var(--muted);margin-top:6px">支持 .xlsx · 永续贷总表</div></div>';
+  h+='<input type="file" id="importFile" accept=".xlsx" style="display:none" onchange="handleImportFile(this.files[0])">';
+  h+='<div id="importFileInfo" style="margin-top:8px;font-size:12px;color:var(--muted)"></div></div>';
+  h+='<div class="card" id="importPreviewCard" style="display:none">';
+  h+='<div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:12px">📋 预览</div>';
+  h+='<div id="importStats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px"></div>';
+  h+='<div style="overflow-x:auto"><table><thead><tr><th>操作</th><th>客户姓名</th><th>品牌</th><th>车牌</th><th>贷款金额</th><th>实际放款</th><th>月利息</th><th>还款日</th><th>负责人</th></tr></thead><tbody id="importPreviewBody"></tbody></table></div>';
+  h+='<div style="margin-top:12px;display:flex;gap:10px"><button class="btn btn-success" id="importConfirmBtn" onclick="doImportConfirm()" disabled>✅ 确认导入</button><button class="btn btn-outline" onclick="nav(\'import\')">🔄 重新上传</button></div></div>';
+  h+='<div class="card" id="importProgressCard" style="display:none">';
+  h+='<div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:10px">⏳ 导入进度</div>';
+  h+='<div style="height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden;margin-bottom:8px"><div id="importProgressFill" style="height:100%;background:#2e7d32;border-radius:3px;width:0%;transition:width .3s"></div></div>';
+  h+='<div id="importProgressText" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>';
+  h+='<div id="importLog" style="background:#1a1a2e;color:#a0e0a0;border-radius:8px;padding:12px;font-size:11px;font-family:monospace;max-height:200px;overflow-y:auto;line-height:1.8"></div>';
+  h+='<div style="margin-top:10px"><button class="btn btn-primary" id="importDoneBtn" style="display:none" onclick="nav(\'list\')">📋 查看合同列表</button></div></div>';
+  document.getElementById('mainContent').innerHTML = h;
+}
+
+function handleImportDrop(e) {
+  e.preventDefault();
+  var file=e.dataTransfer.files[0]; if(file) handleImportFile(file);
+}
+
+var _importPreview=[];
+function handleImportFile(file) {
+  if(!file||!window.XLSX){alert('请稍等，正在加载...');return;}
+  document.getElementById('importFileInfo').textContent='📄 '+file.name;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    try{parseImportWorkbook(XLSX.read(e.target.result,{type:'array',cellDates:true}));}
+    catch(err){alert('解析失败: '+err.message);}
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function parseImportWorkbook(wb) {
+  var allRows=[];
+  wb.SheetNames.forEach(function(sn){
+    var rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:null});
+    var hdrIdx=-1;
+    for(var i=0;i<Math.min(rows.length,5);i++){
+      if(rows[i]&&rows[i].some(function(c){return c&&String(c).includes('客户名字');})){hdrIdx=i;break;}
+    }
+    if(hdrIdx<0) return;
+    var hdr=rows[hdrIdx];
+    function ci(kw){for(var j=0;j<hdr.length;j++){if(hdr[j]&&String(hdr[j]).includes(kw))return j;}return -1;}
+    var C={date:ci('日期'),name:ci('客户名字'),phone:ci('电话'),telegram:ci('飞机'),
+      type:ci('种类'),brand:ci('品牌'),plate:ci('车牌'),appraise:ci('评估'),
+      color:ci('颜色'),status:ci('状态'),staff:ci('客服'),
+      actual:ci('实际放款'),amount:ci('客户贷款'),monthly:ci('每期金额'),
+      paydate:ci('还款日'),note:ci('注')};
+    for(var ri=hdrIdx+1;ri<rows.length;ri++){
+      var row=rows[ri]; if(!row||!row[C.name]) continue;
+      if(!String(row[C.status]||'').includes('进行')) continue;
+      var vt=String(row[C.type]||'');
+      if(!vt.includes('汽车')&&!vt.includes('押证')) continue;
+      var d=row[C.date],ds='';
+      if(d instanceof Date) ds=d.toISOString().slice(0,10);
+      else if(typeof d==='string'){
+        var pts=d.trim().split(/[\/-]/);
+        if(pts.length===3){var y=parseInt(pts[0]),mo=parseInt(pts[1]),dy=parseInt(pts[2]);if(y<100)y+=2000;ds=y+'-'+String(mo).padStart(2,'0')+'-'+String(dy).padStart(2,'0');}
+      } else if(typeof d==='number'){ds=new Date(Math.round((d-25569)*86400*1000)).toISOString().slice(0,10);}
+      var amt=parseFloat(row[C.amount])||0,act=parseFloat(row[C.actual])||0,mon=parseFloat(row[C.monthly])||0;
+      allRows.push({
+        date:ds,name:String(row[C.name]||'').trim(),
+        phone:String(row[C.phone]||row[C.telegram]||'').trim(),
+        brand:String(row[C.brand]||'').trim(),plate:String(row[C.plate]||'').trim(),
+        color:String(row[C.color]||'').trim(),appraise:String(row[C.appraise]||'').trim(),
+        amount:amt,actual:act,monthly:mon,
+        haircut:amt>0&&act>0?Math.round((1-act/amt)*10000)/100:0,
+        rate:amt>0&&mon>0?Math.round(mon/amt*10000)/100:0,
+        paydate:String(row[C.paydate]||'').trim(),
+        staff:String(row[C.staff]||'').trim(),
+        note:String(row[C.note]||'').trim(),
+      });
+    }
+  });
+  if(allRows.length===0){alert('未找到进行中的汽车合同');return;}
+  _importPreview=allRows;
+  renderImportPreview();
+}
+
+function renderImportPreview() {
+  var newCnt=0,skipCnt=0;
+  _importPreview.forEach(function(row){
+    var dup=_loans.some(function(e){return e.name===row.name&&e.plate===row.plate;});
+    row._action=dup?'skip':'new'; if(dup)skipCnt++;else newCnt++;
+  });
+  var tbody=document.getElementById('importPreviewBody'); if(!tbody) return;
+  tbody.innerHTML='';
+  _importPreview.forEach(function(row){
+    var isDup=row._action==='skip';
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td><span style="font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;background:'+(isDup?'#fff3e0':'#e3f2fd')+';color:'+(isDup?'#f57c00':'#1565c0')+'">'+(isDup?'⏭ 跳过':'✅ 导入')+'</span></td>'+
+      '<td style="font-weight:600;color:var(--navy)">'+row.name+'</td><td>'+row.brand+'</td>'+
+      '<td style="font-family:monospace">'+row.plate+'</td>'+
+      '<td style="color:#1565c0;font-weight:600">$'+row.amount.toLocaleString()+'</td>'+
+      '<td style="color:#2e7d32">$'+row.actual.toLocaleString()+'</td>'+
+      '<td>$'+row.monthly+'</td><td style="font-size:11px">'+row.paydate+'</td><td>'+row.staff+'</td>';
+    tbody.appendChild(tr);
+  });
+  document.getElementById('importStats').innerHTML=
+    '<div style="background:#f8f9fa;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:var(--navy)">'+_importPreview.length+'</div><div style="font-size:11px;color:var(--muted)">表格总条数</div></div>'+
+    '<div style="background:#e8f5e9;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#2e7d32">'+newCnt+'</div><div style="font-size:11px;color:var(--muted)">待导入</div></div>'+
+    '<div style="background:#fff3e0;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#f57c00">'+skipCnt+'</div><div style="font-size:11px;color:var(--muted)">已存在跳过</div></div>'+
+    '<div style="background:#e3f2fd;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#1565c0">'+_loans.length+'</div><div style="font-size:11px;color:var(--muted)">系统现有合同</div></div>';
+  document.getElementById('importPreviewCard').style.display='block';
+  var btn=document.getElementById('importConfirmBtn');
+  btn.disabled=newCnt===0;
+  btn.textContent=newCnt===0?'无新合同可导入':'✅ 确认导入 '+newCnt+' 条';
+}
+
+async function doImportConfirm() {
+  var toImport=_importPreview.filter(function(r){return r._action==='new';});
+  if(!toImport.length||!confirm('确认导入 '+toImport.length+' 条新合同？')) return;
+  document.getElementById('importPreviewCard').style.display='none';
+  document.getElementById('importProgressCard').style.display='block';
+  var logEl=document.getElementById('importLog');
+  var fill=document.getElementById('importProgressFill');
+  function log(msg,color){var d=document.createElement('div');d.style.color=color||'#a0e0a0';d.textContent='['+new Date().toLocaleTimeString()+'] '+msg;logEl.appendChild(d);logEl.scrollTop=logEl.scrollHeight;}
+  var success=0,skip=0,err=0;
+  for(var i=0;i<toImport.length;i++){
+    var row=toImport[i];
+    fill.style.width=Math.round((i+1)/toImport.length*100)+'%';
+    document.getElementById('importProgressText').textContent='进度 '+(i+1)+'/'+toImport.length;
+    var dup=_loans.some(function(e){return e.name===row.name&&e.plate===row.plate;});
+    if(dup){log('⏭ 跳过: '+row.name+' '+row.plate,'#ffd93d');skip++;continue;}
+    var id=genId();
+    var loan={id:id,name:row.name,phone:row.phone,idcard:'',brand:row.brand,model:'',color:row.color,
+      plate:row.plate,estimate:row.appraise,amount:row.amount,actualAmount:row.actual,
+      haircut:row.haircut,rate:row.rate,monthly:row.monthly,term:6,repay:'永续贷',status:'active',
+      date:row.date||new Date().toISOString().slice(0,10),
+      note:(row.paydate?'还款日:'+row.paydate+' ':'')+row.note,
+      totalRepay:row.amount+row.monthly*6,totalInterest:row.monthly*6,schedule:[]};
+    _loans.push(loan);
+    try{
+      await saveLoans();
+      log('✅ ['+id+'] '+row.name+' · '+row.plate+' · $'+row.amount,'#a0e0a0');
+      success++;
+    }catch(e2){log('❌ 失败: '+row.name,'#ff6b6b');_loans.pop();err++;}
+    await new Promise(function(res){setTimeout(res,200);});
+  }
+  fill.style.width='100%';
+  log('──────────────────────','#6bcbff');
+  log('完成！导入:'+success+' 跳过:'+skip+' 失败:'+err,'#6bcbff');
+  document.getElementById('importDoneBtn').style.display='inline-block';
+}
 
 function setSyncStatus(s) {
   _syncStatus = s;
