@@ -1200,28 +1200,25 @@ function renderFinancePnL() {
   var monthNewAmount = monthNewLoans.reduce(function(s,l){return s+l.amount;},0);
   var monthNewActual = monthNewLoans.reduce(function(s,l){return s+(l.actualAmount||l.amount*(1-(l.haircut||9.5)/100));},0);
   var monthHaircut   = monthNewLoans.reduce(function(s,l){return s+l.amount*(l.haircut||9.5)/100;},0);
-  // 月应收利息：从收入登记里的应收记录按月统计
-  // 先从_financeRecords找当月"应收"标记的记录（如果没有，用当前在贷合同估算）
-  var monthIntDue_fromRecords = _financeRecords
-    .filter(function(r){ return r.type==='income' && inMonth(r.date,selMonth) && r.category==='利息收入'; })
-    .reduce(function(s,r){ return s+(r.due||r.amount||0); }, 0);
-  // 如果有真实应收数据用真实的，否则用当前在贷估算
-  var monthIntDue_theory = inBetLoans.reduce(function(s,l){return s+l.amount*(l.rate||0)/100;},0);
-  // 从due_records字段找（批量导入时会带due字段）
-  var monthDueRecords = _financeRecords.filter(function(r){
-    return r.type==='income' && inMonth(r.date,selMonth) && r.due && r.due>0;
-  });
-  var monthIntDue = monthDueRecords.length>0
-    ? monthDueRecords.reduce(function(s,r){return s+(r.due||0);},0)
-    : monthIntDue_theory;
+  // ══ 按月应收/实收数据（从Excel表格提取）══
+  var _MONTHLY_DATA = {"2026-03": {"due_int": 414, "recv_int": 414, "due_prin": 4200, "recv_prin": 4200}, "2026-04": {"due_int": 5174, "recv_int": 5174, "due_prin": 62360, "recv_prin": 58360}, "2026-05": {"due_int": 13750, "recv_int": 13253, "due_prin": 147200, "recv_prin": 135300}, "2026-06": {"due_int": 14022, "recv_int": 9016, "due_prin": 73694, "recv_prin": 47134}, "2026-07": {"due_int": 17460, "recv_int": 1000, "due_prin": 47452, "recv_prin": 5500}, "2026-08": {"due_int": 15912, "recv_int": 0, "due_prin": 39772, "recv_prin": 0}, "2026-09": {"due_int": 14227, "recv_int": 0, "due_prin": 84428, "recv_prin": 0}, "2026-10": {"due_int": 7803, "recv_int": 0, "due_prin": 1833, "recv_prin": 0}, "2026-11": {"due_int": 5843, "recv_int": 0, "due_prin": 833, "recv_prin": 0}, "2026-12": {"due_int": 3305, "recv_int": 0, "due_prin": 4133, "recv_prin": 0}};
+  var _md = _MONTHLY_DATA[selMonth] || null;
+  var monthIntDue   = _md ? _md.due_int   : inBetLoans.reduce(function(s,l){return s+l.amount*(l.rate||0)/100;},0);
+  var monthPrinDue  = _md ? _md.due_prin  : 0;
+  var monthPrinRecv_excel = _md ? _md.recv_prin : 0;
+  var monthIntRecv_excel  = _md ? _md.recv_int  : 0;
+  var monthDueRecords = _md ? [_md] : [];
+  var _hasExcelData = !!_md;
   var recInc  = _financeRecords.filter(function(r){return r.type==='income' && inMonth(r.date,selMonth);});
   var recExp  = _financeRecords.filter(function(r){return r.type==='expense'&& inMonth(r.date,selMonth);});
   var manInc  = recInc.reduce(function(s,r){return s+r.amount;},0);
   var manExp  = recExp.reduce(function(s,r){return s+r.amount;},0);
   // 本月实收利息（从收入登记里的"利息收入"分类统计）
-  var monthIntRecv = recInc.filter(function(r){return r.category==='利息收入';}).reduce(function(s,r){return s+r.amount;},0);
-  // 本月实收本金
-  var monthPrinRecv = recInc.filter(function(r){return r.category==='本金回收';}).reduce(function(s,r){return s+r.amount;},0);
+  var monthIntRecv_login = recInc.filter(function(r){return r.category==='利息收入';}).reduce(function(s,r){return s+r.amount;},0);
+  var monthPrinRecv_login = recInc.filter(function(r){return r.category==='本金回收';}).reduce(function(s,r){return s+r.amount;},0);
+  // 优先用Excel提取的数据，其次用收入登记
+  var monthIntRecv  = _hasExcelData ? monthIntRecv_excel  : monthIntRecv_login;
+  var monthPrinRecv = _hasExcelData ? monthPrinRecv_excel : monthPrinRecv_login;
   var incByCat={}, expByCat={};
   recInc.forEach(function(r){incByCat[r.category]=(incByCat[r.category]||0)+r.amount;});
   recExp.forEach(function(r){expByCat[r.category]=(expByCat[r.category]||0)+r.amount;});
@@ -1248,7 +1245,7 @@ function renderFinancePnL() {
   h+='<div class="stats-grid" style="margin-bottom:18px">';
   h+='<div class="stat-card blue"><div class="stat-icon">🏦</div><div class="stat-label">在贷本金总额</div><div class="stat-value" style="font-size:18px">$'+totalPrincipal.toLocaleString()+'</div><div class="stat-sub">共'+(activeLoans.length+overdueLoans.length)+'笔在贷</div></div>';
   h+='<div class="stat-card green"><div class="stat-icon">📤</div><div class="stat-label">本月新放款</div><div class="stat-value" style="font-size:18px">$'+monthNewAmount.toLocaleString()+'</div><div class="stat-sub">'+monthNewLoans.length+'笔 · 实际$'+Math.round(monthNewActual).toLocaleString()+'</div></div>';
-  h+='<div class="stat-card amber"><div class="stat-icon">💰</div><div class="stat-label">月应收利息</div><div class="stat-value" style="font-size:18px">$'+monthIntDue.toFixed(0)+'</div><div class="stat-sub">'+(monthDueRecords.length>0?'来自收息记录':'按在贷合同估算')+'</div></div>';
+  h+='<div class="stat-card amber"><div class="stat-icon">💰</div><div class="stat-label">月应收利息</div><div class="stat-value" style="font-size:18px">$'+monthIntDue.toFixed(0)+'</div><div class="stat-sub">'+(_hasExcelData?'来自Excel数据':'按在贷合同估算')+'</div></div>';
   h+='</div>';
   // 第二行：实收统计
   h+='<div style="margin-bottom:10px;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px">▌ 本月实收（来自收入登记）</div>';
