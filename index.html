@@ -212,6 +212,7 @@ html,body{overflow:auto;height:auto}
 // ══ 后端API配置（Key藏在服务器，前端看不到）══
 var _loans = [];
 var _editId = null;
+var _collapsedMonths = {}; // 记录折叠状态
 var _currentNav = "home";
 var _financeRecords = [];
 var _syncStatus = "idle";
@@ -829,6 +830,15 @@ function updateStatCards() {
   });
 }
 
+
+function toggleMonth(mk) {
+  _collapsedMonths[mk] = !_collapsedMonths[mk];
+  var body = document.getElementById('mg_'+mk);
+  var arrow = document.getElementById('ma_'+mk);
+  if(body) body.style.display = _collapsedMonths[mk] ? 'none' : '';
+  if(arrow) arrow.textContent = _collapsedMonths[mk] ? '▶' : '▼';
+}
+
 function filterList() {
   var mobile=window.innerWidth<=768;
   var q=(document.getElementById('searchInput')?.value||'').trim().toLowerCase();
@@ -858,9 +868,11 @@ function filterList() {
     mkeys.forEach(function(mk){
       var gloans=groups[mk];
       var gamt=gloans.reduce(function(s,l){return s+l.amount;},0);
-      h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 4px;margin:12px 0 6px;border-bottom:2px solid var(--navy)">';
-      h+='<span style="font-weight:700;color:var(--navy)">📅 '+mk+'</span>';
-      h+='<span style="font-size:12px;color:var(--muted)">'+gloans.length+'笔 · $'+gamt.toLocaleString()+'</span></div>';
+      var isCollapsed = !!_collapsedMonths[mk];
+      h+='<div onclick="toggleMonth(\''+mk+'\')" style="display:flex;justify-content:space-between;align-items:center;padding:10px 8px;margin:12px 0 0;background:var(--navy);border-radius:8px;color:#fff;cursor:pointer">';
+      h+='<span style="font-weight:700;font-size:13px"><span id="ma_'+mk+'">'+(isCollapsed?'▶':'▼')+'</span> 📅 '+mk+'</span>';
+      h+='<span style="font-size:12px;opacity:.8">'+gloans.length+'笔 · $'+gamt.toLocaleString()+'</span></div>';
+      h+='<div id="mg_'+mk+'" style="display:'+(isCollapsed?'none':'')+';">';
       gloans.forEach(function(l){
         var sc=l.status==='overdue'?'overdue':l.status==='closed'?'closed':l.status==='pending'?'pending':'';
         h+='<div class="loan-card '+sc+'">';
@@ -873,6 +885,7 @@ function filterList() {
         h+='<div class="loan-card-btns"><button class="btn btn-primary" onclick="editLoan(\''+l.id+'\')">✏️ 编辑</button><button class="btn btn-danger" onclick="deleteLoan(\''+l.id+'\')">🗑 删除</button></div>';
         h+='</div>';
       });
+      h+='</div>';
     });
     result.innerHTML+=h;
   } else {
@@ -884,10 +897,11 @@ function filterList() {
       var gloans=groups[mk];
       var gamt=gloans.reduce(function(s,l){return s+l.amount;},0);
       var gmon=gloans.reduce(function(s,l){return s+(l.monthly||0);},0);
-      h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;margin:14px 0 6px;background:var(--navy);border-radius:8px;color:#fff">';
-      h+='<span style="font-weight:700;font-size:13px">📅 '+mk+'</span>';
+      var isCollapsed = !!_collapsedMonths[mk];
+      h+='<div onclick="toggleMonth(\''+mk+'\')" style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;margin:14px 0 0;background:var(--navy);border-radius:'+(isCollapsed?'8px':'8px 8px 0 0')+';color:#fff;cursor:pointer;user-select:none">';
+      h+='<span style="font-weight:700;font-size:13px"><span id="ma_'+mk+'">'+(isCollapsed?'▶':'▼')+'</span> 📅 '+mk+'</span>';
       h+='<span style="font-size:12px;opacity:.8">'+gloans.length+'笔 · 贷款$'+gamt.toLocaleString()+' · 月息$'+gmon.toFixed(0)+'</span></div>';
-      h+='<div class="card" style="padding:0;overflow:hidden;margin-bottom:4px"><div class="table-wrap"><table><thead><tr>';
+      h+='<div id="mg_'+mk+'" style="display:'+(isCollapsed?'none':'')+';margin-bottom:10px"><div class="card" style="padding:0;overflow:hidden;border-radius:0 0 8px 8px"><div class="table-wrap"><table><thead><tr>';
       h+='<th>#</th><th>客户姓名</th><th>手机号</th><th>车牌 / 品牌</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>月利率%</th><th>月利息</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th>';
       h+='</tr></thead><tbody>';
       gloans.forEach(function(l){
@@ -908,7 +922,7 @@ function filterList() {
         h+='<td style="white-space:nowrap"><button class="btn btn-sm btn-primary" onclick="editLoan(\''+l.id+'\')">✏️ 编辑</button> <button class="btn btn-sm btn-danger" onclick="deleteLoan(\''+l.id+'\')">删除</button></td>';
         h+='</tr>';
       });
-      h+='</tbody></table></div></div>';
+      h+='</tbody></table></div></div></div>';
     });
     result.innerHTML+=h;
   }
