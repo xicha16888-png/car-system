@@ -301,50 +301,148 @@ function handleImportFile(file) {
   reader.readAsArrayBuffer(file);
 }
 
+// ══ 日期解析通用函数 ══
+function parseDate(d) {
+  if(!d) return '';
+  if(d instanceof Date) return d.toISOString().slice(0,10);
+  if(typeof d==='number') return new Date(Math.round((d-25569)*86400*1000)).toISOString().slice(0,10);
+  if(typeof d==='string') {
+    var s=d.trim().replace(/ /g,'').replace(/\t/g,'');
+    var pts=s.split(/[\/-]/);
+    if(pts.length===3){var y=parseInt(pts[0]),mo=parseInt(pts[1]),dy=parseInt(pts[2]);if(y<100)y+=2000;return y+'-'+String(mo).padStart(2,'0')+'-'+String(dy).padStart(2,'0');}
+  }
+  return '';
+}
+
+// ══ 识别表格类型：永续贷 or 正常贷款 ══
+function detectTableType(hdr) {
+  var hasMonthly = hdr.some(function(c){return c&&String(c).includes('每期金额');});
+  var hasPeriodPrin = hdr.some(function(c){return c&&String(c).includes('应收本金');});
+  if(hasPeriodPrin) return 'normal';   // 正常贷款（先息后本/等额本息）
+  if(hasMonthly)   return 'revolving'; // 永续贷
+  return 'unknown';
+}
+
+// ══ 历史收息记录（从表格导入） ══
+var _importIncomePreview = [];
+
 function parseImportWorkbook(wb) {
-  var allRows=[];
+  var loanRows=[], incomeRows=[];
   wb.SheetNames.forEach(function(sn){
-    var rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:null});
+    var rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:null,raw:false});
+    var rawRows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:null});
     var hdrIdx=-1;
-    for(var i=0;i<Math.min(rows.length,5);i++){
-      if(rows[i]&&rows[i].some(function(c){return c&&String(c).includes('客户名字');})){hdrIdx=i;break;}
+    for(var i=0;i<Math.min(rawRows.length,5);i++){
+      if(rawRows[i]&&rawRows[i].some(function(c){return c&&String(c).includes('客户名字');})){hdrIdx=i;break;}
     }
     if(hdrIdx<0) return;
-    var hdr=rows[hdrIdx];
+    var hdr=rawRows[hdrIdx];
+    var ttype=detectTableType(hdr);
     function ci(kw){for(var j=0;j<hdr.length;j++){if(hdr[j]&&String(hdr[j]).includes(kw))return j;}return -1;}
-    var C={date:ci('日期'),name:ci('客户名字'),phone:ci('电话'),telegram:ci('飞机'),
-      type:ci('种类'),brand:ci('品牌'),plate:ci('车牌'),appraise:ci('评估'),
-      color:ci('颜色'),status:ci('状态'),staff:ci('客服'),
-      actual:ci('实际放款'),amount:ci('客户贷款'),monthly:ci('每期金额'),
-      paydate:ci('还款日'),note:ci('注')};
-    for(var ri=hdrIdx+1;ri<rows.length;ri++){
-      var row=rows[ri]; if(!row||!row[C.name]) continue;
-      if(!String(row[C.status]||'').includes('进行')) continue;
-      var vt=String(row[C.type]||'');
-      if(!vt.includes('汽车')&&!vt.includes('押证')) continue;
-      var d=row[C.date],ds='';
-      if(d instanceof Date) ds=d.toISOString().slice(0,10);
-      else if(typeof d==='string'){
-        var pts=d.trim().split(/[\/-]/);
-        if(pts.length===3){var y=parseInt(pts[0]),mo=parseInt(pts[1]),dy=parseInt(pts[2]);if(y<100)y+=2000;ds=y+'-'+String(mo).padStart(2,'0')+'-'+String(dy).padStart(2,'0');}
-      } else if(typeof d==='number'){ds=new Date(Math.round((d-25569)*86400*1000)).toISOString().slice(0,10);}
-      var amt=parseFloat(row[C.amount])||0,act=parseFloat(row[C.actual])||0,mon=parseFloat(row[C.monthly])||0;
-      allRows.push({
-        date:ds,name:String(row[C.name]||'').trim(),
-        phone:String(row[C.phone]||row[C.telegram]||'').trim(),
-        brand:String(row[C.brand]||'').trim(),plate:String(row[C.plate]||'').trim(),
-        color:String(row[C.color]||'').trim(),appraise:String(row[C.appraise]||'').trim(),
-        amount:amt,actual:act,monthly:mon,
-        haircut:amt>0&&act>0?Math.round((1-act/amt)*10000)/100:0,
-        rate:amt>0&&mon>0?Math.round(mon/amt*10000)/100:0,
-        paydate:String(row[C.paydate]||'').trim(),
-        staff:String(row[C.staff]||'').trim(),
-        note:String(row[C.note]||'').trim(),
-      });
+
+    if(ttype==='revolving') {
+      // ══ 永续贷格式 ══
+      var C={date:ci('日期'),name:ci('客户名字'),phone:ci('电话'),telegram:ci('飞机'),
+        type:ci('种类'),brand:ci('品牌'),plate:ci('车牌'),appraise:ci('评估'),
+        color:ci('颜色'),status:ci('状态'),staff:ci('客服'),
+        actual:ci('实际放款'),amount:ci('客户贷款'),monthly:ci('每期金额'),paydate:ci('还款日'),note:ci('注')};
+      for(var ri=hdrIdx+1;ri<rawRows.length;ri++){
+        var row=rawRows[ri]; if(!row||!row[C.name]) continue;
+        var vt=String(row[C.type]||'');
+        if(!vt.includes('汽车')&&!vt.includes('押证')) continue;
+        var isActive=String(row[C.status]||'').includes('进行');
+        var amt=parseFloat(row[C.amount])||0,act=parseFloat(row[C.actual])||0,mon=parseFloat(row[C.monthly])||0;
+        var ds=parseDate(row[C.date]);
+        var entry={
+          date:ds,name:String(row[C.name]||'').trim(),
+          phone:String(row[C.phone]||row[C.telegram]||'').trim(),
+          brand:String(row[C.brand]||'').trim(),plate:String(row[C.plate]||'').trim(),
+          color:String(row[C.color]||'').trim(),appraise:String(row[C.appraise]||'').trim(),
+          amount:amt,actual:act,monthly:mon,
+          haircut:amt>0&&act>0?Math.round((1-act/amt)*10000)/100:0,
+          rate:amt>0&&mon>0?Math.round(mon/amt*10000)/100:0,
+          paydate:String(row[C.paydate]||'').trim(),
+          staff:String(row[C.staff]||'').trim(),
+          note:String(row[C.note]||'').trim(),
+          repay:'永续贷',term:6
+        };
+        if(isActive) loanRows.push(entry);
+        // 历史实收利息（列17,19,21,23,25,27）
+        for(var pi=0;pi<6;pi++){
+          var recvCol=17+pi*2, dueCol=16+pi*2;
+          var recv=parseFloat(row[recvCol])||0;
+          if(recv>0) incomeRows.push({
+            name:entry.name,plate:entry.plate,sheet:sn,
+            period:pi+1,amount:recv,category:'利息收入',
+            note:sn+'第'+(pi+1)+'期'
+          });
+        }
+      }
+    } else if(ttype==='normal') {
+      // ══ 正常贷款格式 ══
+      var C2={date:ci('日期'),name:ci('客户名字'),phone:ci('电话'),telegram:ci('飞机'),
+        type:ci('种类'),brand:ci('品牌'),plate:ci('车牌'),appraise:ci('评估'),
+        color:ci('颜色'),status:ci('状态'),staff:ci('客服'),term:ci('期数'),
+        actual:ci('实际放款'),amount:ci('客户贷款'),
+        paidPrin:ci('已還本金'),unpaidPrin:ci('未還本金'),
+        paidInt:ci('已還利息'),unpaidInt:ci('未還利息'),note:ci('注')};
+      for(var ri=hdrIdx+1;ri<rawRows.length;ri++){
+        var row=rawRows[ri]; if(!row||!row[C2.name]) continue;
+        var vt=String(row[C2.type]||'');
+        if(!vt.includes('汽车')&&!vt.includes('押证')) continue;
+        var isActive=String(row[C2.status]||'').includes('进行');
+        var amt=parseFloat(row[C2.amount])||0,act=parseFloat(row[C2.actual])||0;
+        var term=parseInt(row[C2.term])||3;
+        var ds=parseDate(row[C2.date]);
+        // 判断还款方式：先息后本 or 等额本息
+        // 规律：先息后本 = 前N-1期本金为0，最后一期还全部本金
+        var repay='先息后本';
+        // 检查第1期应收本金（列11）
+        var p1prin=parseFloat(row[11])||0;
+        if(p1prin>0 && p1prin<amt) repay='等额本息';
+        // 每期利息（从应收利息推算）
+        var int1=parseFloat(row[13])||0;
+        var monthly=int1; // 先息后本：月利息固定
+        if(repay==='等额本息') monthly=p1prin+int1;
+        var rate=amt>0&&int1>0?Math.round(int1/amt*10000)/100:0;
+        var entry={
+          date:ds,name:String(row[C2.name]||'').trim(),
+          phone:String(row[C2.phone]||row[C2.telegram]||'').trim(),
+          brand:String(row[C2.brand]||'').trim(),plate:String(row[C2.plate]||'').trim(),
+          color:String(row[C2.color]||'').trim(),appraise:String(row[C2.appraise]||'').trim(),
+          amount:amt,actual:act,monthly:monthly,
+          haircut:amt>0&&act>0?Math.round((1-act/amt)*10000)/100:0,
+          rate:rate,term:term,repay:repay,
+          staff:String(row[C2.staff]||'').trim(),
+          note:String(row[C2.note]||'').trim(),
+          paydate:''
+        };
+        if(isActive) loanRows.push(entry);
+        // 历史实收：从各期实收本金+实收利息提取
+        for(var pi=0;pi<6;pi++){
+          var base=10+pi*6;
+          if(base+4>=hdr.length) break;
+          var recvPrin=parseFloat(row[base+2])||0;
+          var recvInt =parseFloat(row[base+4])||0;
+          var payDate=parseDate(row[base]);
+          if(recvInt>0) incomeRows.push({
+            name:entry.name,plate:entry.plate,sheet:sn,
+            period:pi+1,amount:recvInt,category:'利息收入',
+            date:payDate,note:sn+'第'+(pi+1)+'期利息'
+          });
+          if(recvPrin>0) incomeRows.push({
+            name:entry.name,plate:entry.plate,sheet:sn,
+            period:pi+1,amount:recvPrin,category:'本金回收',
+            date:payDate,note:sn+'第'+(pi+1)+'期本金'
+          });
+        }
+      }
     }
   });
-  if(allRows.length===0){alert('未找到进行中的汽车合同');return;}
-  _importPreview=allRows;
+
+  if(loanRows.length===0&&incomeRows.length===0){alert('未找到汽车合同数据，请检查文件格式');return;}
+  _importPreview=loanRows;
+  _importIncomePreview=incomeRows;
   renderImportPreview();
 }
 
@@ -367,11 +465,12 @@ function renderImportPreview() {
       '<td>$'+row.monthly+'</td><td style="font-size:11px">'+row.paydate+'</td><td>'+row.staff+'</td>';
     tbody.appendChild(tr);
   });
+  var incTotal=_importIncomePreview.reduce(function(s,r){return s+r.amount;},0);
   document.getElementById('importStats').innerHTML=
-    '<div style="background:#f8f9fa;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:var(--navy)">'+_importPreview.length+'</div><div style="font-size:11px;color:var(--muted)">表格总条数</div></div>'+
-    '<div style="background:#e8f5e9;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#2e7d32">'+newCnt+'</div><div style="font-size:11px;color:var(--muted)">待导入</div></div>'+
+    '<div style="background:#f8f9fa;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:var(--navy)">'+_importPreview.length+'</div><div style="font-size:11px;color:var(--muted)">进行中合同</div></div>'+
+    '<div style="background:#e8f5e9;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#2e7d32">'+newCnt+'</div><div style="font-size:11px;color:var(--muted)">待导入合同</div></div>'+
     '<div style="background:#fff3e0;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#f57c00">'+skipCnt+'</div><div style="font-size:11px;color:var(--muted)">已存在跳过</div></div>'+
-    '<div style="background:#e3f2fd;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#1565c0">'+_loans.length+'</div><div style="font-size:11px;color:var(--muted)">系统现有合同</div></div>';
+    '<div style="background:#fce4ec;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#c62828">'+_importIncomePreview.length+'</div><div style="font-size:11px;color:var(--muted)">历史收息记录 $'+incTotal.toFixed(0)+'</div></div>';
   document.getElementById('importPreviewCard').style.display='block';
   var btn=document.getElementById('importConfirmBtn');
   btn.disabled=newCnt===0;
@@ -409,8 +508,38 @@ async function doImportConfirm() {
     await new Promise(function(res){setTimeout(res,200);});
   }
   fill.style.width='100%';
-  log('──────────────────────','#6bcbff');
-  log('完成！导入:'+success+' 跳过:'+skip+' 失败:'+err,'#6bcbff');
+  log('──────────────────','#6bcbff');
+  log('合同导入完成！新增:'+success+' 跳过:'+skip+' 失败:'+err,'#6bcbff');
+
+  // ══ 导入历史收息记录 ══
+  if(_importIncomePreview.length>0) {
+    log('──────────────────','#6bcbff');
+    log('开始导入历史收息记录 '+_importIncomePreview.length+' 条...','#6bcbff');
+    var incSuccess=0;
+    for(var ii=0;ii<_importIncomePreview.length;ii++){
+      var ir=_importIncomePreview[ii];
+      // 找关联合同ID
+      var loan=_loans.find(function(l){return l.name===ir.name&&l.plate===ir.plate;});
+      var rec={
+        id:'F'+Date.now()+'_'+ii,
+        type:'income',
+        amount:ir.amount,
+        category:ir.category||'利息收入',
+        date:ir.date||new Date().toISOString().slice(0,10),
+        loanId:loan?loan.id:'',
+        note:ir.note||''
+      };
+      _financeRecords.unshift(rec);
+      incSuccess++;
+    }
+    try{
+      await saveLoans();
+      log('收息记录导入完成！共'+incSuccess+'条','#a0e0a0');
+    }catch(e3){log('收息记录保存失败: '+e3.message,'#ff6b6b');}
+  }
+
+  log('══════════════════','#6bcbff');
+  log('全部完成！','#6bcbff');
   document.getElementById('importDoneBtn').style.display='inline-block';
 }
 
@@ -1071,11 +1200,16 @@ function renderFinancePnL() {
   var monthNewAmount = monthNewLoans.reduce(function(s,l){return s+l.amount;},0);
   var monthNewActual = monthNewLoans.reduce(function(s,l){return s+(l.actualAmount||l.amount*(1-(l.haircut||9.5)/100));},0);
   var monthHaircut   = monthNewLoans.reduce(function(s,l){return s+l.amount*(l.haircut||9.5)/100;},0);
-  var monthIntDue    = inBetLoans.reduce(function(s,l){return s+l.amount*(l.rate||0)/100;},0);
+  // 月应收利息：按当月在贷合同理论值
+  var monthIntDue = inBetLoans.reduce(function(s,l){return s+l.amount*(l.rate||0)/100;},0);
   var recInc  = _financeRecords.filter(function(r){return r.type==='income' && inMonth(r.date,selMonth);});
   var recExp  = _financeRecords.filter(function(r){return r.type==='expense'&& inMonth(r.date,selMonth);});
   var manInc  = recInc.reduce(function(s,r){return s+r.amount;},0);
   var manExp  = recExp.reduce(function(s,r){return s+r.amount;},0);
+  // 本月实收利息（从收入登记里的"利息收入"分类统计）
+  var monthIntRecv = recInc.filter(function(r){return r.category==='利息收入';}).reduce(function(s,r){return s+r.amount;},0);
+  // 本月实收本金
+  var monthPrinRecv = recInc.filter(function(r){return r.category==='本金回收';}).reduce(function(s,r){return s+r.amount;},0);
   var incByCat={}, expByCat={};
   recInc.forEach(function(r){incByCat[r.category]=(incByCat[r.category]||0)+r.amount;});
   recExp.forEach(function(r){expByCat[r.category]=(expByCat[r.category]||0)+r.amount;});
@@ -1102,9 +1236,19 @@ function renderFinancePnL() {
   h+='<div class="stats-grid" style="margin-bottom:18px">';
   h+='<div class="stat-card blue"><div class="stat-icon">🏦</div><div class="stat-label">在贷本金总额</div><div class="stat-value" style="font-size:18px">$'+totalPrincipal.toLocaleString()+'</div><div class="stat-sub">共'+(activeLoans.length+overdueLoans.length)+'笔在贷</div></div>';
   h+='<div class="stat-card green"><div class="stat-icon">📤</div><div class="stat-label">本月新放款</div><div class="stat-value" style="font-size:18px">$'+monthNewAmount.toLocaleString()+'</div><div class="stat-sub">'+monthNewLoans.length+'笔 · 实际$'+Math.round(monthNewActual).toLocaleString()+'</div></div>';
-  h+='<div class="stat-card amber"><div class="stat-icon">💰</div><div class="stat-label">月应收利息</div><div class="stat-value" style="font-size:18px">$'+monthIntDue.toFixed(0)+'</div><div class="stat-sub">在贷+逾期合同</div></div>';
-  h+='<div class="stat-card '+(overdueRate>10?'red':'purple')+'"><div class="stat-icon">⚠️</div><div class="stat-label">逾期率</div><div class="stat-value" style="font-size:18px">'+overdueRate+'%</div><div class="stat-sub">'+overdueLoans.length+'笔逾期</div></div>';
+  h+='<div class="stat-card amber"><div class="stat-icon">💰</div><div class="stat-label">月应收利息（理论）</div><div class="stat-value" style="font-size:18px">$'+monthIntDue.toFixed(0)+'</div><div class="stat-sub">按当前在贷合同估算</div></div>';
   h+='</div>';
+  // 第二行：实收统计
+  h+='<div style="margin-bottom:10px;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px">▌ 本月实收（来自收入登记）</div>';
+  h+='<div class="stats-grid" style="margin-bottom:18px">';
+  h+='<div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-label">实收利息</div><div class="stat-value" style="font-size:18px">$'+monthIntRecv.toFixed(0)+'</div><div class="stat-sub">利息收入登记合计</div></div>';
+  h+='<div class="stat-card blue"><div class="stat-icon">🏦</div><div class="stat-label">实收本金</div><div class="stat-value" style="font-size:18px">$'+monthPrinRecv.toFixed(0)+'</div><div class="stat-sub">本金回收登记合计</div>';
+  var collectRate = monthIntDue>0?Math.round(monthIntRecv/monthIntDue*100):0;
+  h+='</div><div class="stat-card '+(collectRate>=80?'green':collectRate>=50?'amber':'red')+'"><div class="stat-icon">📊</div><div class="stat-label">利息回收率</div><div class="stat-value" style="font-size:18px">'+collectRate+'%</div><div class="stat-sub">实收/应收</div></div>';
+  h+='<div class="stat-card '+(overdueRate>10?'red':'purple')+'"><div class="stat-icon">⚠️</div><div class="stat-label">逾期率</div><div class="stat-value" style="font-size:18px">'+overdueRate+'%</div><div class="stat-sub">'+overdueLoans.length+'笔逾期</div></div>';
+
+  h+='</div>';
+
 
   // 损益表
   h+='<div class="card">';
