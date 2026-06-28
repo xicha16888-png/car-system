@@ -938,39 +938,95 @@ async function deleteLoan(id) {
   saveLoans(); filterList();
 }
 
+function onLoanSelect() {
+  var id = document.getElementById('fi_loanId')?.value||'';
+  var loan = _loans.find(function(l){return l.id===id;});
+  if(!loan) {
+    document.getElementById('fi_loanInfo').innerHTML='';
+    return;
+  }
+  // 自动填金额（月利息）
+  var amtEl = document.getElementById('fi_amount');
+  if(amtEl) amtEl.value = loan.monthly || 0;
+  // 自动选分类
+  var catEl = document.getElementById('fi_category');
+  if(catEl) catEl.value = '利息收入';
+  // 显示合同信息
+  document.getElementById('fi_loanInfo').innerHTML =
+    '<div style="background:#e3f2fd;border-radius:8px;padding:10px 14px;font-size:12px;display:flex;gap:20px;flex-wrap:wrap">'+
+    '<span>👤 <b>'+loan.name+'</b></span>'+
+    '<span>🚗 '+loan.plate+(loan.brand?' · '+loan.brand:'')+'</span>'+
+    '<span>💰 贷款 <b style="color:#1565c0">$'+loan.amount.toLocaleString()+'</b></span>'+
+    '<span>💵 月利息 <b style="color:#2e7d32">$'+(loan.monthly||0).toFixed(2)+'</b></span>'+
+    '<span>📋 '+(loan.repay||'等额本息')+'</span>'+
+    '<span>状态 '+statusHtml(loan.status)+'</span>'+
+    '</div>';
+}
+
 function renderFinanceForm(type) {
-  var isIncome = type==="income";
-  var title = isIncome ? "💵 收入登记" : "💸 支出登记";
-  var sub = isIncome ? "记录贷款收款、利息收入等" : "记录运营开支、办公费用等";
-  var h = '<div class="page-header"><div class="page-title">'+title+'</div><div class="page-sub">'+sub+'</div></div>';
-  h += '<div class="card"><div class="form-grid">';
-  h += '<div class="form-group"><label>金额（元）*</label><input type="number" id="fi_amount" placeholder="0" min="0"></div>';
-  h += '<div class="form-group"><label>分类</label><select id="fi_category">';
+  var isIncome = type==='income';
+  var title = isIncome ? '💵 收入登记' : '💸 支出登记';
+  var sub = isIncome ? '记录贷款收款、利息收入等' : '记录运营开支、办公费用等';
+  var h='';
+  h+='<div class="page-header"><div class="page-title">'+title+'</div><div class="page-sub">'+sub+'</div></div>';
+  h+='<div class="card">';
+
+  // 收入登记：先选合同
   if(isIncome) {
-    h += '<option value="利息收入">利息收入</option><option value="本金回收">本金回收</option><option value="手续费">手续费</option><option value="滞纳金">滞纳金</option><option value="其他收入">其他收入</option>';
+    h+='<div style="margin-bottom:14px">';
+    h+='<label style="font-size:12px;font-weight:700;color:var(--navy);display:block;margin-bottom:6px">🔗 选择关联合同（自动带出金额）</label>';
+    h+='<select id="fi_loanId" onchange="onLoanSelect()" style="width:100%;padding:10px 12px;border:1.5px solid #cfd8dc;border-radius:8px;font-size:13px;font-family:inherit;background:#fff">';
+    h+='<option value="">-- 不关联合同（手动填金额）--</option>';
+    // 只显示还款中+逾期的合同
+    var activeL=_loans.filter(function(l){return l.status==='active'||l.status==='overdue';});
+    activeL.sort(function(a,b){return (b.date||'').localeCompare(a.date||'');});
+    activeL.forEach(function(l){
+      h+='<option value="'+l.id+'">'+l.id+' · '+l.name+' · '+l.plate+' · 月息$'+(l.monthly||0).toFixed(2)+'</option>';
+    });
+    h+='</select>';
+    h+='<div id="fi_loanInfo" style="margin-top:8px"></div>';
+    h+='</div>';
+  }
+
+  h+='<div class="form-grid">';
+  h+='<div class="form-group"><label>金额（$）*</label><input type="number" id="fi_amount" placeholder="0" min="0" step="0.01"></div>';
+  h+='<div class="form-group"><label>分类</label><select id="fi_category">';
+  if(isIncome) {
+    h+='<option value="利息收入">利息收入</option><option value="本金回收">本金回收</option><option value="手续费">手续费</option><option value="滞纳金">滞纳金</option><option value="其他收入">其他收入</option>';
   } else {
-    h += '<option value="办公费用">办公费用</option><option value="工资支出">工资支出</option><option value="推广费用">推广费用</option><option value="车辆评估">车辆评估费</option><option value="其他支出">其他支出</option>';
+    h+='<option value="办公费用">办公费用</option><option value="工资支出">工资支出</option><option value="推广费用">推广费用</option><option value="车辆评估费">车辆评估费</option><option value="其他支出">其他支出</option>';
   }
-  h += '</select></div><div class="form-group"><label>日期</label><input type="date" id="fi_date"></div>';
-  h += '<div class="form-group"><label>关联贷款编号（可选）</label><input type="text" id="fi_loanId" placeholder="如：CL202605001"></div>';
-  h += '<div class="form-group span2"><label>备注</label><input type="text" id="fi_note" placeholder="备注说明"></div>';
-  h += '</div><div class="btn-row"><button class="btn btn-primary" onclick="saveFinanceRecord(\''+type+'\')">✅ 保存</button>';
-  h += '<button class="btn btn-outline" onclick="nav(\'finance_pnl\')">📊 查看利润表</button></div></div>';
-  h += '<div class="card"><div class="card-header"><div class="card-title">📋 最近'+(isIncome?"收入":"支出")+'记录</div></div>';
-  var records = _financeRecords.filter(function(r){return r.type===type}).slice(-10).reverse();
-  if(records.length===0) { h += '<div style="text-align:center;padding:30px;color:var(--muted)">暂无记录</div>'; }
+  h+='</select></div>';
+  h+='<div class="form-group"><label>日期</label><input type="date" id="fi_date" value="'+new Date().toISOString().slice(0,10)+'"></div>';
+  if(!isIncome) {
+    h+='<div class="form-group"><label>关联合同（可选）</label><input type="text" id="fi_loanId" placeholder="如：CL202605001"></div>';
+  }
+  h+='<div class="form-group '+(isIncome?'':'span2')+'"><label>备注</label><input type="text" id="fi_note" placeholder="备注说明"></div>';
+  h+='</div>';
+  h+='<div class="btn-row">';
+  h+='<button class="btn btn-primary" onclick="saveFinanceRecord(\''+type+'\')">✅ 保存</button>';
+  h+='<button class="btn btn-outline" onclick="nav(\'finance_pnl\')">📊 查看利润表</button>';
+  h+='</div></div>';
+
+  // 最近记录
+  h+='<div class="card"><div class="card-header"><div class="card-title">📋 最近'+(isIncome?'收入':'支出')+'记录</div></div>';
+  var records=_financeRecords.filter(function(r){return r.type===type;}).slice(0,15);
+  if(records.length===0){h+='<div style="text-align:center;padding:30px;color:var(--muted)">暂无记录</div>';}
   else {
-    h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>金额</th><th>分类</th><th>关联贷款</th><th>备注</th><th>操作</th></tr></thead><tbody>';
-    for(var i=0;i<records.length;i++) {
-      var r = records[i];
-      h += '<tr><td>'+formatDate(r.date)+'</td><td style="font-weight:600">'+formatMoney(r.amount)+'</td><td>'+r.category+'</td><td>'+(r.loanId||"-")+'</td><td style="color:var(--muted)">'+(r.note||"")+'</td>';
-      h += '<td><button class="btn btn-sm btn-danger" onclick="deleteFinanceRecord(\''+r.id+'\')">删除</button></td></tr>';
-    }
-    h += "</tbody></table></div>";
+    h+='<div class="table-wrap"><table><thead><tr><th>日期</th><th>金额</th><th>分类</th><th>关联合同</th><th>备注</th><th>操作</th></tr></thead><tbody>';
+    records.forEach(function(r){
+      var loan=r.loanId?_loans.find(function(l){return l.id===r.loanId;}):null;
+      h+='<tr><td>'+formatDate(r.date)+'</td>';
+      h+='<td style="font-weight:600;color:#2e7d32">'+formatMoney(r.amount)+'</td>';
+      h+='<td>'+r.category+'</td>';
+      h+='<td style="font-size:12px">'+(loan?r.loanId+'<br><span style="color:var(--muted)">'+loan.name+'</span>':(r.loanId||'—'))+'</td>';
+      h+='<td style="color:var(--muted);font-size:12px">'+(r.note||'')+'</td>';
+      h+='<td><button class="btn btn-sm btn-danger" onclick="deleteFinanceRecord(\''+r.id+'\')">删除</button></td></tr>';
+    });
+    h+='</tbody></table></div>';
   }
-  h += "</div>";
-  document.getElementById("mainContent").innerHTML = h;
-  var de = document.getElementById("fi_date"); if(de && !de.value) de.value = new Date().toISOString().slice(0,10);
+  h+='</div>';
+  document.getElementById('mainContent').innerHTML = h;
 }
 
 async function saveFinanceRecord(type) {
