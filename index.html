@@ -192,6 +192,7 @@ html,body{overflow:auto;height:auto}
   <div class="mob-more-item" onclick="closeMobMore();nav('finance_income')"><span class="mmi">💵</span>收入登记</div>
   <div class="mob-more-item" onclick="closeMobMore();nav('finance_expense')"><span class="mmi">💸</span>支出登记</div>
   <div class="mob-divider"></div>
+  <div class="mob-more-item" onclick="closeMobMore();nav('import')"><span class="mmi">📥</span>批量导入</div>
   <div class="mob-more-item" onclick="closeMobMore();doBackup()"><span class="mmi">💾</span>备份数据</div>
   <div class="mob-more-item" onclick="closeMobMore();doRestore()"><span class="mmi">📂</span>恢复数据</div>
 </div>
@@ -555,6 +556,7 @@ function buildSidebar() {
     {sec:"风控提醒"},
     {id:"overdue", icon:"⚠️", label:"逾期催收"},
     {sec:"系统设置"},
+    {id:"import", icon:"📥", label:"批量导入"},
     {id:"backup", icon:"💾", label:"备份数据"},
     {id:"restore", icon:"📂", label:"恢复数据"},
   ];
@@ -585,6 +587,7 @@ function nav(page) {
   else if(page==="overdue") renderOverdue();
   else if(page==="backup") { doBackup(); _currentNav="home"; buildSidebar(); buildMobNav(); }
   else if(page==="restore") { doRestore(); _currentNav="home"; buildSidebar(); buildMobNav(); }
+  else if(page==="import") renderImport();
 }
 
 function renderHome() {
