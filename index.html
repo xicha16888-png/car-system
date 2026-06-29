@@ -728,9 +728,15 @@ function renderHome() {
   var closed = _loans.filter(function(l){return l.status==="closed"}).length;
   var totalAmt = _loans.reduce(function(s,l){return s+l.amount},0);
   var activeAmt = _loans.filter(function(l){return l.status!=="closed"}).reduce(function(s,l){return s+l.amount},0);
-  var totalIncome = _financeRecords.filter(function(r){return r.type==="income"}).reduce(function(s,r){return s+r.amount},0);
-  var totalExpense = _financeRecords.filter(function(r){return r.type==="expense"}).reduce(function(s,r){return s+r.amount},0);
-  var profit = totalIncome - totalExpense;
+  // 利息收入 + 砍头息（从合同自动归集）
+  var totalInterestIncome = _financeRecords.filter(function(r){return r.type==="income" && r.category==="利息收入";}).reduce(function(s,r){return s+r.amount;},0);
+  var totalHaircut = _loans.reduce(function(s,l){return s+l.amount*(l.haircut||0)/100;},0);
+  var totalOtherIncome = _financeRecords.filter(function(r){return r.type==="income" && r.category!=="利息收入" && r.category!=="本金回收";}).reduce(function(s,r){return s+r.amount;},0);
+  // 本金回收不计入利润（只是资金回流）
+  var totalPrinRecov = _financeRecords.filter(function(r){return r.type==="income" && r.category==="本金回收";}).reduce(function(s,r){return s+r.amount;},0);
+  var totalIncome = totalInterestIncome + totalOtherIncome; // 不含本金回收
+  var totalExpense = _financeRecords.filter(function(r){return r.type==="expense";}).reduce(function(s,r){return s+r.amount;},0);
+  var profit = totalHaircut + totalIncome - totalExpense;
 
   var h = "";
   h += '<div class="page-header"><div class="page-title">🏠 系统首页</div><div class="page-sub">汽车抵押贷款业务 · 财务一体化管理平台</div></div>';
@@ -740,9 +746,10 @@ function renderHome() {
   h += '<div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-label">还款中</div><div class="stat-value">'+active+'</div><div class="stat-sub">笔</div></div>';
   h += '<div class="stat-card amber"><div class="stat-icon">⏳</div><div class="stat-label">审核中</div><div class="stat-value">'+pending+'</div><div class="stat-sub">笔</div></div>';
   h += '<div class="stat-card red"><div class="stat-icon">⚠️</div><div class="stat-label">已逾期</div><div class="stat-value">'+overdue+'</div><div class="stat-sub">笔</div></div>';
-  h += '<div class="stat-card purple"><div class="stat-icon">💰</div><div class="stat-label">累计收入</div><div class="stat-value">'+formatMoney(totalIncome)+'</div><div class="stat-sub">财务</div></div>';
-  h += '<div class="stat-card blue"><div class="stat-icon">💵</div><div class="stat-label">累计支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div><div class="stat-sub">财务</div></div>';
-  h += '<div class="stat-card green"><div class="stat-icon">📈</div><div class="stat-label">净利润</div><div class="stat-value">'+formatMoney(profit)+'</div><div class="stat-sub">'+(profit>=0?"盈利":"亏损")+'</div></div>';
+  h += '<div class="stat-card purple"><div class="stat-icon">💰</div><div class="stat-label">累计利息收入</div><div class="stat-value">'+formatMoney(totalInterestIncome)+'</div><div class="stat-sub">不含本金回收</div></div>';
+  h += '<div class="stat-card amber"><div class="stat-icon">✂️</div><div class="stat-label">累计砍头息</div><div class="stat-value">'+formatMoney(totalHaircut)+'</div><div class="stat-sub">合同自动归集</div></div>';
+  h += '<div class="stat-card blue"><div class="stat-icon">💸</div><div class="stat-label">累计支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div><div class="stat-sub">运营成本</div></div>';
+  h += '<div class="stat-card green"><div class="stat-icon">📈</div><div class="stat-label">净利润</div><div class="stat-value">'+formatMoney(profit)+'</div><div class="stat-sub">'+(profit>=0?'盈利':'亏损')+' · 砍头息+利息-支出</div></div>';
   h += '<div class="stat-card amber"><div class="stat-icon">🏦</div><div class="stat-label">在贷余额</div><div class="stat-value">'+formatMoney(activeAmt)+'</div><div class="stat-sub">未结清</div></div>';
   h += "</div>";
 
