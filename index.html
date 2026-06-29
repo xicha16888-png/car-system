@@ -1206,7 +1206,13 @@ function renderFinancePnL() {
   var monthNewLoans  = _loans.filter(function(l){return inMonth(l.date,selMonth);});
   var monthNewAmount = monthNewLoans.reduce(function(s,l){return s+l.amount;},0);
   var monthNewActual = monthNewLoans.reduce(function(s,l){return s+(l.actualAmount||l.amount*(1-(l.haircut||9.5)/100));},0);
-  var monthHaircut   = monthNewLoans.reduce(function(s,l){return s+l.amount*(l.haircut||9.5)/100;},0);
+  // 砍头息 = 贷款金额 - 实际放款（精确计算，不用默认9.5%）
+  var monthHaircut = monthNewLoans.reduce(function(s,l){
+    var hc = l.actualAmount && l.amount > 0
+      ? (l.amount - l.actualAmount)   // 精确：合同金额 - 实际放款
+      : l.amount*(l.haircut||0)/100;  // 备用：用haircut字段
+    return s + (hc > 0 ? hc : 0);
+  },0);
   // ══ 按月应收/实收数据（从Excel表格提取）══
   var _MONTHLY_DATA = {"2026-03": {"due_int": 414, "recv_int": 414, "due_prin": 4200, "recv_prin": 4200}, "2026-04": {"due_int": 5174, "recv_int": 5174, "due_prin": 62360, "recv_prin": 58360}, "2026-05": {"due_int": 13750, "recv_int": 13253, "due_prin": 147200, "recv_prin": 135300}, "2026-06": {"due_int": 14022, "recv_int": 9016, "due_prin": 73694, "recv_prin": 47134}, "2026-07": {"due_int": 17460, "recv_int": 1000, "due_prin": 47452, "recv_prin": 5500}, "2026-08": {"due_int": 15912, "recv_int": 0, "due_prin": 39772, "recv_prin": 0}, "2026-09": {"due_int": 14227, "recv_int": 0, "due_prin": 84428, "recv_prin": 0}, "2026-10": {"due_int": 7803, "recv_int": 0, "due_prin": 1833, "recv_prin": 0}, "2026-11": {"due_int": 5843, "recv_int": 0, "due_prin": 833, "recv_prin": 0}, "2026-12": {"due_int": 3305, "recv_int": 0, "due_prin": 4133, "recv_prin": 0}};
   var _md = _MONTHLY_DATA[selMonth] || null;
@@ -1288,8 +1294,11 @@ function renderFinancePnL() {
 
   h+=sec('▌ 一、营业收入');
   h+=row('砍头息收入（本月新放款自动归集）',monthHaircut,'#2e7d32',true,false);
-  for(var k in incByCat) h+=row(k,incByCat[k],'#2e7d32',true,false);
-  h+=row('本金回收（不计入利润）',manPrinRecov,'#9e9e9e',true,false);
+  for(var k in incByCat) {
+    if(k==='本金回收') continue; // 本金回收单独在下方显示
+    h+=row(k,incByCat[k],'#2e7d32',true,false);
+  }
+  if(manPrinRecov>0) h+=row('本金回收（不计入利润，仅供参考）',manPrinRecov,'#9e9e9e',true,false);
   h+=row('营业收入合计（利息+砍头息）',monthHaircut+manInc,'#1565c0',false,true);
 
   h+=sec('▌ 二、应收利息（参考，未计入损益）');
