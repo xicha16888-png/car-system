@@ -1026,13 +1026,14 @@ function buildSidebar() {
   if(canWriteLoans()) items.push({id:"add", icon:"➕", label:"新增贷款"});
   items.push({id:"list", icon:"📋", label:"贷款列表"});
   items.push({id:"acquired_list", icon:"🚙", label:"收购车辆"});
+  if(canWriteLoans()) items.push({id:"repay_collect", icon:"💰", label:"回款登记"});
   if(canWriteLoans()) items.push({id:"import", icon:"📥", label:"批量导入"});
   if(canViewFinance()) {
     items.push({sec:"财务管理"});
     items.push({id:"finance_pnl", icon:"📊", label:"利润表"});
     items.push({id:"settlement", icon:"🧾", label:"历史结算"});
     items.push({id:"finance_cashflow", icon:"💰", label:"现金流"});
-    items.push({id:"finance_income", icon:"💵", label:canAddFinance()?"收入登记":"收入记录（只读）"});
+    items.push({id:"finance_income", icon:"💵", label:canAddFinance()?"其他收入登记":"收入记录（只读）"});
     items.push({id:"finance_expense", icon:"💸", label:canAddFinance()?"支出登记":"支出记录（只读）"});
   }
   items.push({sec:"风控提醒"});
@@ -1057,7 +1058,7 @@ function buildSidebar() {
 
 // ══ 页面级权限校验（前端拦截，真正的数据保护在服务器）══
 var PAGE_REQUIRES = {
-  add:"writeLoans", acquired_add:"writeLoans", import:"writeLoans",
+  add:"writeLoans", acquired_add:"writeLoans", import:"writeLoans", repay_collect:"writeLoans",
   backup:"boss", restore:"boss", user_manage:"boss",
   finance_pnl:"viewFinance", settlement:"viewFinance", finance_cashflow:"viewFinance",
   haircut_detail:"viewFinance", interest_detail:"viewFinance", profit_detail:"viewFinance",
@@ -1085,6 +1086,7 @@ function nav(page) {
   else if(page==="finance_cashflow") renderCashFlow();
   else if(page==="finance_income") renderFinanceForm("income");
   else if(page==="finance_expense") renderFinanceForm("expense");
+  else if(page==="repay_collect") renderRepayCollect();
   else if(page==="overdue") renderOverdue();
   else if(page==="backup") { doBackup(); _currentNav="home"; buildSidebar(); buildMobNav(); }
   else if(page==="restore") { doRestore(); _currentNav="home"; buildSidebar(); buildMobNav(); }
@@ -1303,8 +1305,9 @@ function renderHome() {
   h += '<div class="card"><div class="card-header"><div class="card-title">🚀 快速入口</div></div><div class="home-grid">';
   if(canWriteLoans()) h += '<div class="home-card" onclick="nav(\'add\')"><div class="icon">➕</div><div class="label">新增贷款</div><div class="sublabel">录入新合同</div></div>';
   h += '<div class="home-card" onclick="nav(\'list\')"><div class="icon">📋</div><div class="label">贷款列表</div><div class="sublabel">查询/编辑</div></div>';
+  if(canWriteLoans()) h += '<div class="home-card" onclick="nav(\'repay_collect\')" style="border:2px solid #1565c0"><div class="icon">💰</div><div class="label">回款登记</div><div class="sublabel">客户还本/还息</div></div>';
   if(canAddFinance()) {
-    h += '<div class="home-card" onclick="nav(\'finance_income\')"><div class="icon">💵</div><div class="label">收入登记</div><div class="sublabel">记录收款</div></div>';
+    h += '<div class="home-card" onclick="nav(\'finance_income\')"><div class="icon">💵</div><div class="label">其他收入登记</div><div class="sublabel">跟合同无关的收入</div></div>';
     h += '<div class="home-card" onclick="nav(\'finance_expense\')"><div class="icon">💸</div><div class="label">支出登记</div><div class="sublabel">记录开支</div></div>';
   }
   if(canViewFinance()) h += '<div class="home-card" onclick="nav(\'finance_pnl\')"><div class="icon">📊</div><div class="label">利润表</div><div class="sublabel">财务分析</div></div>';
@@ -1856,6 +1859,189 @@ function onLoanSelect() {
     '<span>📋 '+(loan.repay||'等额本息')+'</span>'+
     '<span>状态 '+statusHtml(loan.status)+'</span>'+
     '</div>';
+}
+
+// ══ 回款登记（业务员日常登记客户还款，覆盖三种还款方式，所有合同通用）══
+// 跟"财务管理"里老板专用的"其他收入登记"是两码事：那个是给老板记跟合同无关的杂项
+// 收支的；这个是业务员每天要用的——客户这个月还钱了，选合同+选第几期，系统按
+// loanFreshInterestCalc()（跟"实际月利率"用的是同一套现算引擎，保证口径一致）
+// 现算出这一期该收多少本金、多少利息，业务员确认/微调金额后保存。
+// 保存时故意拆成两条独立的财务记录（利息收入 / 本金回收），而不是揉成一条——
+// 因为利润表算净利润时，本金回收是要被剔除的（本金不是利润，是把本来就是自己的
+// 钱收回来），如果混在一条记录里就没法正确区分，会把本金也算成利润。
+function loanRemainingPrincipal(loan) {
+  var recovered = _financeRecords.filter(function(r){ return r.loanId===loan.id && r.category==='本金回收'; }).reduce(function(s,r){ return s+(r.amount||0); }, 0);
+  return Math.max(0, Math.round(((loan.amount||0) - recovered)*100)/100);
+}
+function loanRecordedPeriods(loanId) {
+  return _financeRecords.filter(function(r){ return r.loanId===loanId && r.period; }).map(function(r){ return r.period; });
+}
+function nextUnrecordedPeriod(loanId) {
+  var periods = loanRecordedPeriods(loanId);
+  if(!periods.length) return 1;
+  return Math.max.apply(null, periods) + 1;
+}
+// 按合同当前条件重新算出的还款计划表，取第N期该收的本金/利息/合计；
+// 如果客户还在继续还（比如永续贷早就超过了当初录的期数），超出计划表的部分按
+// 当前月利率估算一笔纯利息（永续贷本来就是"只要不结清，一直收利息"的产品）。
+function repayPrefill(loan, period) {
+  var calc = loanFreshInterestCalc(loan);
+  var entry = calc.schedule[period-1];
+  if(entry) return { principal: entry.principal||0, interest: entry.interest||0, total: entry.total||0 };
+  var interest = Math.round((loan.amount||0) * (loan.rate||0)/100 * 100)/100;
+  return { principal: 0, interest: interest, total: interest };
+}
+
+function renderRepayCollect() {
+  var h='';
+  h+='<div class="page-header"><div class="page-title">💰 回款登记</div><div class="page-sub">登记客户每期还款——先息后本/永续贷/等额本息通用，自动按当前合同条件拆分本金和利息</div></div>';
+  h+='<div class="card">';
+  h+='<div style="margin-bottom:14px">';
+  h+='<label style="font-size:12px;font-weight:700;color:var(--navy);display:block;margin-bottom:6px">🔗 选择合同</label>';
+  h+='<select id="rc_loanId" onchange="onRepayLoanSelect()" style="width:100%;padding:10px 12px;border:1.5px solid #cfd8dc;border-radius:8px;font-size:13px;font-family:inherit;background:#fff">';
+  h+='<option value="">-- 请选择合同 --</option>';
+  var activeL = loanRecords().filter(function(l){ return l.status==='active'||l.status==='overdue'; });
+  activeL.sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+  activeL.forEach(function(l){
+    h+='<option value="'+l.id+'">'+l.id+' · '+l.name+' · '+l.plate+' · '+(l.repay||'等额本息')+'</option>';
+  });
+  h+='</select>';
+  h+='<div id="rc_loanInfo" style="margin-top:8px"></div>';
+  h+='</div>';
+
+  h+='<div id="rc_formArea" style="display:none">';
+  h+='<div class="form-grid">';
+  h+='<div class="form-group"><label>期数（第几期）</label><select id="rc_period" onchange="onRepayPeriodChange()"></select></div>';
+  h+='<div class="form-group"><label>还款日期</label><input type="date" id="rc_date" value="'+new Date().toISOString().slice(0,10)+'"></div>';
+  h+='<div class="form-group"><label>本期利息（$）</label><input type="number" id="rc_interest" min="0" step="0.01"></div>';
+  h+='<div class="form-group"><label>本期本金（$）</label><input type="number" id="rc_principal" min="0" step="0.01"></div>';
+  h+='<div class="form-group"><label>滞纳金（$，选填）</label><input type="number" id="rc_latefee" min="0" step="0.01" value="0"></div>';
+  h+='<div class="form-group"><label style="display:flex;align-items:center;gap:6px;margin-top:22px;cursor:pointer"><input type="checkbox" id="rc_settle" onchange="onRepaySettleToggle()" style="width:auto"> 客户提前结清（本金一次还清）</label></div>';
+  h+='<div class="form-group span2"><label>备注</label><input type="text" id="rc_note" placeholder="备注说明"></div>';
+  h+='</div>';
+  h+='<div class="btn-row">';
+  h+='<button class="btn btn-primary" onclick="saveRepayCollect()">✅ 保存回款</button>';
+  h+='<button class="btn btn-outline" onclick="nav(\'list\')">📋 返回贷款列表</button>';
+  h+='</div>';
+  h+='</div>';
+  h+='</div>';
+
+  h+='<div class="card" id="rc_historyCard" style="display:none"><div class="card-header"><div class="card-title">📋 该合同回款记录</div></div><div id="rc_historyBody"></div></div>';
+
+  document.getElementById('mainContent').innerHTML = h;
+}
+
+function onRepayLoanSelect() {
+  var id = document.getElementById('rc_loanId')?.value||'';
+  var loan = _loans.find(function(l){ return l.id===id; });
+  var infoEl = document.getElementById('rc_loanInfo');
+  var formArea = document.getElementById('rc_formArea');
+  var historyCard = document.getElementById('rc_historyCard');
+  if(!loan) {
+    if(infoEl) infoEl.innerHTML='';
+    if(formArea) formArea.style.display='none';
+    if(historyCard) historyCard.style.display='none';
+    return;
+  }
+  var remain = loanRemainingPrincipal(loan);
+  infoEl.innerHTML =
+    '<div style="background:#e3f2fd;border-radius:8px;padding:10px 14px;font-size:12px;display:flex;gap:20px;flex-wrap:wrap">'+
+    '<span>👤 <b>'+loan.name+'</b></span>'+
+    '<span>🚗 '+loan.plate+(loan.brand?' · '+loan.brand:'')+'</span>'+
+    '<span>💰 贷款 <b style="color:#1565c0">$'+(loan.amount||0).toLocaleString()+'</b></span>'+
+    '<span>📋 '+(loan.repay||'等额本息')+' · 共'+(loan.term||1)+'期</span>'+
+    '<span>🧮 月利率 '+(loan.rate||0)+'%</span>'+
+    '<span>剩余本金 <b style="color:#e65100">$'+remain.toLocaleString()+'</b></span>'+
+    '</div>';
+
+  var sel = document.getElementById('rc_period');
+  var nextP = nextUnrecordedPeriod(id);
+  var recorded = loanRecordedPeriods(id);
+  var maxP = Math.max(loan.term||1, nextP+2);
+  var opts='';
+  for(var i=1;i<=maxP;i++) {
+    var already = recorded.indexOf(i) >= 0;
+    opts += '<option value="'+i+'"'+(i===nextP?' selected':'')+'>第'+i+'期'+(already?'（已登记）':'')+'</option>';
+  }
+  sel.innerHTML = opts;
+  document.getElementById('rc_settle').checked = false;
+  formArea.style.display='block';
+  onRepayPeriodChange();
+  renderRepayHistory(id);
+}
+
+function onRepayPeriodChange() {
+  var loanId = document.getElementById('rc_loanId')?.value||'';
+  var loan = _loans.find(function(l){ return l.id===loanId; });
+  if(!loan) return;
+  var period = parseInt(document.getElementById('rc_period')?.value)||1;
+  var pf = repayPrefill(loan, period);
+  document.getElementById('rc_interest').value = pf.interest;
+  document.getElementById('rc_principal').value = pf.principal;
+  document.getElementById('rc_settle').checked = false;
+}
+
+function onRepaySettleToggle() {
+  var loanId = document.getElementById('rc_loanId')?.value||'';
+  var loan = _loans.find(function(l){ return l.id===loanId; });
+  if(!loan) return;
+  var checked = document.getElementById('rc_settle').checked;
+  if(checked) document.getElementById('rc_principal').value = loanRemainingPrincipal(loan);
+  else onRepayPeriodChange();
+}
+
+function renderRepayHistory(loanId) {
+  var card = document.getElementById('rc_historyCard');
+  var body = document.getElementById('rc_historyBody');
+  var records = _financeRecords.filter(function(r){ return r.loanId===loanId && (r.category==='利息收入'||r.category==='本金回收'||r.category==='滞纳金'); });
+  records.sort(function(a,b){ return (b.date||'').localeCompare(a.date||'') || ((b.period||0)-(a.period||0)); });
+  if(!records.length) { card.style.display='none'; return; }
+  card.style.display='block';
+  var h='<div class="table-wrap"><table><thead><tr><th>期数</th><th>日期</th><th>分类</th><th>金额</th><th>备注</th><th>操作</th></tr></thead><tbody>';
+  records.forEach(function(r){
+    h+='<tr><td>'+(r.period?'第'+r.period+'期':'—')+'</td><td>'+formatDate(r.date)+'</td><td>'+r.category+'</td>';
+    h+='<td style="font-weight:600;color:#2e7d32">'+formatMoney(r.amount)+'</td>';
+    h+='<td style="color:var(--muted);font-size:12px">'+(r.note||'')+'</td>';
+    h+='<td>'+(canDelete()?'<button class="btn btn-sm btn-danger" onclick="deleteFinanceRecord(\''+r.id+'\')">删除</button>':'<span style="color:var(--muted);font-size:12px">—</span>')+'</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  body.innerHTML = h;
+}
+
+async function saveRepayCollect() {
+  if(!canWriteLoans()) { alert("⛔ 你的账号没有登记回款的权限"); return; }
+  var loanId = document.getElementById('rc_loanId')?.value||'';
+  var loan = _loans.find(function(l){ return l.id===loanId; });
+  if(!loan) { alert("请先选择合同"); return; }
+  var period = parseInt(document.getElementById('rc_period')?.value)||1;
+  var date = document.getElementById('rc_date')?.value||new Date().toISOString().slice(0,10);
+  var interest = parseFloat(document.getElementById('rc_interest')?.value)||0;
+  var principal = parseFloat(document.getElementById('rc_principal')?.value)||0;
+  var latefee = parseFloat(document.getElementById('rc_latefee')?.value)||0;
+  var note = document.getElementById('rc_note')?.value.trim()||"";
+  if(interest<=0 && principal<=0 && latefee<=0) { alert("请至少填写利息/本金/滞纳金其中一项金额"); return; }
+
+  var stamp = Date.now();
+  var newRecs = [];
+  if(interest>0) newRecs.push({ id:"F"+stamp+"1", type:"income", amount:interest, category:"利息收入", date:date, loanId:loanId, period:period, note:note });
+  if(principal>0) newRecs.push({ id:"F"+stamp+"2", type:"income", amount:principal, category:"本金回收", date:date, loanId:loanId, period:period, note:note });
+  if(latefee>0) newRecs.push({ id:"F"+stamp+"3", type:"income", amount:latefee, category:"滞纳金", date:date, loanId:loanId, period:period, note:note });
+  newRecs.forEach(function(r){ _financeRecords.unshift(r); });
+  await saveFinance();
+
+  var remain = loanRemainingPrincipal(loan);
+  var closedNow = false;
+  if(remain<=0 && loan.status!=='closed') {
+    if(confirm("该合同本金已全部收回（剩余$0），是否标记合同为「已结清」？")) {
+      loan.status = 'closed';
+      await saveLoans();
+      closedNow = true;
+    }
+  }
+  alert("✅ 第"+period+"期回款已登记"+(closedNow?"，合同已标记为已结清":""));
+  renderRepayCollect();
+  var reselect = document.getElementById('rc_loanId');
+  if(reselect && !closedNow) { reselect.value = loanId; onRepayLoanSelect(); }
 }
 
 function renderFinanceForm(type) {
