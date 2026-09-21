@@ -225,7 +225,7 @@ function doBackup() {
   a.href = URL.createObjectURL(new Blob([j],{type:"application/json"}));
   a.download = "CAR_backup_"+today+".json"; a.click();
   var csv1 = ["编号,客户,手机,车牌,品牌,型号,颜色,评估价,贷款金额,实际放款,月利率%,期限,方式,状态,放款日,备注"];
-  _loans.forEach(function(l){csv1.push([l.id,l.name,l.phone,l.idcard||"",l.brand||"",l.model||"",l.color||"",l.estimate||0,l.amount,l.actualAmount||"",l.rate,l.term,l.repay||"",l.status,l.date,(l.note||"").replace(/,/g,"；")].join(","));});
+  loanRecords().forEach(function(l){csv1.push([l.id,l.name,l.phone,l.idcard||"",l.brand||"",l.model||"",l.color||"",l.estimate||0,l.amount,l.actualAmount||"",l.rate,l.term,l.repay||"",l.status,l.date,(l.note||"").replace(/,/g,"；")].join(","));});
   setTimeout(function(){var a2=document.createElement("a");a2.href=URL.createObjectURL(new Blob(["﻿"+csv1.join("\n")],{type:"text/csv;charset=utf-8"}));a2.download="CAR_合同_"+today+".csv";a2.click();},300);
   var csv2 = ["编号,类型,金额,分类,日期,合同编号,备注"];
   _financeRecords.forEach(function(r){csv2.push([r.id,r.type==="income"?"收入":"支出",r.amount,r.category,r.date,r.loanId||"",(r.note||"").replace(/,/g,"；")].join(","));});
@@ -599,6 +599,31 @@ function loanHaircutAmount(l) {
   return l.amount*(l.haircut||0)/100;
 }
 
+// ══ 收购车辆（公司收购持有，等待转卖的车） vs 抵押车辆（放贷抵押车）══
+// 两者共用 _loans 数组/car_loans 存储，用 assetType==='acquired' 区分，
+// 这样不需要改后端 server.js 的白名单字段即可上线。
+// 抵押贷款相关的统计/报表一律要排除收购车辆，用 loanRecords() 代替直接用 _loans。
+function isAcquired(l) { return !!(l && l.assetType === "acquired"); }
+function loanRecords() { return _loans.filter(function(l){ return !isAcquired(l); }); }
+function acquiredRecords() { return _loans.filter(isAcquired); }
+function genAcquiredId() {
+  var d = new Date();
+  var prefix = "AQ"+d.getFullYear()+String(d.getMonth()+1).padStart(2,"0");
+  var n = 1;
+  for(var i=0;i<_loans.length;i++) {
+    if(_loans[i].id && _loans[i].id.startsWith(prefix)) {
+      var num = parseInt(_loans[i].id.slice(-3)) || 0;
+      if(num >= n) n = num+1;
+    }
+  }
+  return prefix+String(n).padStart(3,"0");
+}
+// 收购车利润（只有已售出才算）= 成交价 − 采购成本 − 额外支出
+function acquiredProfit(a) {
+  if(a.status!=="sold" || a.saleAmount==null) return null;
+  return (a.saleAmount||0) - (a.amount||0) - (a.extraCost||0);
+}
+
 // ══ 三种还款方式计算引擎 ══
 function calcRepay(amount, rate, term, repay, haircut) {
   // amount: 贷款金额(合同面值), rate: 月利率%, term: 期数, repay: 还款方式, haircut: 砍头比例%
@@ -684,6 +709,7 @@ function buildSidebar() {
     {sec:"业务管理"},
     {id:"add", icon:"➕", label:"新增贷款"},
     {id:"list", icon:"📋", label:"贷款列表"},
+    {id:"acquired_list", icon:"🚙", label:"收购车辆"},
     {sec:"财务管理"},
     {id:"finance_pnl", icon:"📊", label:"利润表"},
     {id:"finance_cashflow", icon:"💰", label:"现金流"},
@@ -727,11 +753,13 @@ function nav(page) {
   else if(page==="haircut_detail") renderHaircutDetail();
   else if(page==="interest_detail") renderInterestDetail();
   else if(page==="profit_detail") renderProfitDetail();
+  else if(page==="acquired_list") renderAcquiredList();
+  else if(page==="acquired_add") renderAcquiredForm();
 }
 
 // ══ 首页数字点进去看明细 ══
 function renderHaircutDetail() {
-  var rows = _loans.map(function(l){
+  var rows = loanRecords().map(function(l){
     return {l:l, hc: loanHaircutAmount(l)};
   }).sort(function(a,b){ return b.hc - a.hc; });
   var total = rows.reduce(function(s,r){ return s+r.hc; },0);
@@ -764,7 +792,7 @@ function renderInterestDetail() {
 
 function renderProfitDetail() {
   var totalInterestIncome = _financeRecords.filter(function(r){return r.type==="income" && r.category==="利息收入";}).reduce(function(s,r){return s+r.amount;},0);
-  var totalHaircut = _loans.reduce(function(s,l){return s+loanHaircutAmount(l);},0);
+  var totalHaircut = loanRecords().reduce(function(s,l){return s+loanHaircutAmount(l);},0);
   var otherRecs = _financeRecords.filter(function(r){return r.type==="income" && r.category!=="利息收入" && r.category!=="本金回收";});
   var totalOtherIncome = otherRecs.reduce(function(s,r){return s+r.amount;},0);
   var expRecs = _financeRecords.filter(function(r){return r.type==="expense";});
@@ -794,22 +822,27 @@ function renderProfitDetail() {
 }
 
 function renderHome() {
-  var total = _loans.length;
-  var active = _loans.filter(function(l){return l.status==="active"}).length;
-  var overdue = _loans.filter(function(l){return l.status==="overdue"}).length;
-  var pending = _loans.filter(function(l){return l.status==="pending"}).length;
-  var closed = _loans.filter(function(l){return l.status==="closed"}).length;
-  var totalAmt = _loans.reduce(function(s,l){return s+l.amount},0);
-  var activeAmt = _loans.filter(function(l){return l.status!=="closed"}).reduce(function(s,l){return s+l.amount},0);
-  // 利息收入 + 砍头息（从合同自动归集）
+  var _lr = loanRecords();
+  var total = _lr.length;
+  var active = _lr.filter(function(l){return l.status==="active"}).length;
+  var overdue = _lr.filter(function(l){return l.status==="overdue"}).length;
+  var pending = _lr.filter(function(l){return l.status==="pending"}).length;
+  var closed = _lr.filter(function(l){return l.status==="closed"}).length;
+  var totalAmt = _lr.reduce(function(s,l){return s+l.amount},0);
+  var activeAmt = _lr.filter(function(l){return l.status!=="closed"}).reduce(function(s,l){return s+l.amount},0);
+  // 利息收入 + 砍头息（从合同自动归集，不含收购车辆）
   var totalInterestIncome = _financeRecords.filter(function(r){return r.type==="income" && r.category==="利息收入";}).reduce(function(s,r){return s+r.amount;},0);
-  var totalHaircut = _loans.reduce(function(s,l){return s+loanHaircutAmount(l);},0);
+  var totalHaircut = _lr.reduce(function(s,l){return s+loanHaircutAmount(l);},0);
   var totalOtherIncome = _financeRecords.filter(function(r){return r.type==="income" && r.category!=="利息收入" && r.category!=="本金回收";}).reduce(function(s,r){return s+r.amount;},0);
   // 本金回收不计入利润（只是资金回流）
   var totalPrinRecov = _financeRecords.filter(function(r){return r.type==="income" && r.category==="本金回收";}).reduce(function(s,r){return s+r.amount;},0);
   var totalIncome = totalInterestIncome + totalOtherIncome; // 不含本金回收
   var totalExpense = _financeRecords.filter(function(r){return r.type==="expense";}).reduce(function(s,r){return s+r.amount;},0);
   var profit = totalHaircut + totalIncome - totalExpense;
+  var _aq = acquiredRecords();
+  var acqStock = _aq.filter(function(a){return a.status!=="sold";});
+  var acqStockCount = acqStock.length;
+  var acqStockCost = acqStock.reduce(function(s,a){return s+(a.amount||0);},0);
 
   var h = "";
   h += '<div class="page-header"><div class="page-title">🏠 系统首页</div><div class="page-sub">汽车抵押贷款业务 · 财务一体化管理平台</div></div>';
@@ -824,6 +857,7 @@ function renderHome() {
   h += '<div class="stat-card blue" style="cursor:pointer" onclick="nav(\'finance_expense\')"><div class="stat-icon">💸</div><div class="stat-label">累计支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div><div class="stat-sub">运营成本 · 点击查看明细</div></div>';
   h += '<div class="stat-card green" style="cursor:pointer" onclick="nav(\'profit_detail\')"><div class="stat-icon">📈</div><div class="stat-label">净利润</div><div class="stat-value">'+formatMoney(profit)+'</div><div class="stat-sub">'+(profit>=0?'盈利':'亏损')+' · 点击查看计算过程</div></div>';
   h += '<div class="stat-card amber"><div class="stat-icon">🏦</div><div class="stat-label">在贷余额</div><div class="stat-value">'+formatMoney(activeAmt)+'</div><div class="stat-sub">未结清</div></div>';
+  h += '<div class="stat-card purple" style="cursor:pointer" onclick="nav(\'acquired_list\')"><div class="stat-icon">🚙</div><div class="stat-label">收购车辆库存</div><div class="stat-value">'+formatMoney(acqStockCost)+'</div><div class="stat-sub">'+acqStockCount+'台库存中 · 点击查看</div></div>';
   h += "</div>";
 
   h += '<div class="card"><div class="card-header"><div class="card-title">🚀 快速入口</div></div><div class="home-grid">';
@@ -836,10 +870,10 @@ function renderHome() {
   h += "</div></div>";
 
   h += '<div class="card"><div class="card-header"><div class="card-title">📋 最近贷款记录</div></div>';
-  if(_loans.length===0) { h += '<div style="text-align:center;padding:40px;color:var(--muted)">暂无记录</div>'; }
+  if(_lr.length===0) { h += '<div style="text-align:center;padding:40px;color:var(--muted)">暂无记录</div>'; }
   else {
     h += '<div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>车牌</th><th>金额</th><th>状态</th><th>放款日</th></tr></thead><tbody>';
-    var recent = _loans.slice(-5).reverse();
+    var recent = _lr.slice(-5).reverse();
     for(var i=0;i<recent.length;i++) {
       var l = recent[i];
       h += '<tr><td style="font-weight:600;color:var(--sky)">'+l.id+'</td><td>'+l.name+'</td><td>'+l.plate+'</td><td>'+formatMoney(l.amount)+'</td><td>'+statusHtml(l.status)+'</td><td>'+formatDate(l.date)+'</td></tr>';
@@ -1020,12 +1054,13 @@ async function saveLoan() {
 
 
 function renderList() {
-  var active  = _loans.filter(function(l){return l.status==='active';}).length;
-  var overdue = _loans.filter(function(l){return l.status==='overdue';}).length;
-  var closed  = _loans.filter(function(l){return l.status==='closed';}).length;
-  var pending = _loans.filter(function(l){return l.status==='pending';}).length;
+  var _lr = loanRecords();
+  var active  = _lr.filter(function(l){return l.status==='active';}).length;
+  var overdue = _lr.filter(function(l){return l.status==='overdue';}).length;
+  var closed  = _lr.filter(function(l){return l.status==='closed';}).length;
+  var pending = _lr.filter(function(l){return l.status==='pending';}).length;
   var h='';
-  h+='<div class="page-header"><div class="page-title">🚗 贷款查询</div><div class="page-sub">共 '+_loans.length+' 笔合同</div></div>';
+  h+='<div class="page-header"><div class="page-title">🚗 贷款查询</div><div class="page-sub">共 '+_lr.length+' 笔合同</div></div>';
   // 统计栏
   h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">';
   h+='<div style="background:#e8f5e9;border-radius:10px;padding:10px 12px;cursor:pointer;border:2px solid transparent" onclick="setStatusFilter(\'active\')" id="sc_active"><div style="font-size:18px;font-weight:700;color:#2e7d32">'+active+'</div><div style="font-size:11px;color:#546e7a">还款中</div></div>';
@@ -1048,7 +1083,7 @@ function renderList() {
 
 function getMonthOptions() {
   var months={};
-  _loans.forEach(function(l){if(l.date)months[l.date.slice(0,7)]=1;});
+  loanRecords().forEach(function(l){if(l.date)months[l.date.slice(0,7)]=1;});
   var arr=Object.keys(months).sort().reverse();
   return arr.map(function(m){return '<option value="'+m+'">'+m+'</option>';}).join('');
 }
@@ -1082,7 +1117,7 @@ function filterList() {
   var s=document.getElementById('statusFilter')?.value||'';
   var m=document.getElementById('monthFilter')?.value||'';
   var rp=document.getElementById('repayFilter')?.value||'';
-  var filtered=_loans.slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+  var filtered=loanRecords().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
   if(q) filtered=filtered.filter(function(l){return (l.name||'').toLowerCase().indexOf(q)>=0||(l.phone||'').indexOf(q)>=0||(l.plate||'').toLowerCase().indexOf(q)>=0||(l.id||'').toLowerCase().indexOf(q)>=0;});
   if(s) filtered=filtered.filter(function(l){return l.status===s;});
   if(m) filtered=filtered.filter(function(l){return l.date&&l.date.slice(0,7)===m;});
@@ -1173,6 +1208,161 @@ async function deleteLoan(id) {
   if(!confirm("确定删除编号 "+id+" 的记录？")) return;
   _loans = _loans.filter(function(l){ return l.id!==id; });
   saveLoans(); filterList();
+}
+
+// ══════════════════════════════════════════════
+// ══ 收购车辆模块（公司收购/买断持有，等待转卖，非抵押贷款）══
+// 与"贷款列表"完全分开展示；未售出前不计算任何利润，
+// 售出后自动生成一笔"其他收入"财务记录，自动汇入净利润。
+// ══════════════════════════════════════════════
+var _editAcquiredId = null;
+
+function renderAcquiredList() {
+  var list = acquiredRecords().slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+  var stock = list.filter(function(a){return a.status!=='sold';});
+  var sold  = list.filter(function(a){return a.status==='sold';});
+  var stockCost = stock.reduce(function(s,a){return s+(a.amount||0);},0);
+  var soldProfit = sold.reduce(function(s,a){var p=acquiredProfit(a);return s+(p||0);},0);
+  var h='';
+  h+='<div class="page-header"><div class="page-title">🚙 收购车辆</div><div class="page-sub">公司收购/买断持有的车辆库存 · 与抵押贷款分开管理，未售出前不计入利润</div></div>';
+  h+='<div class="stats-grid" style="margin-bottom:14px">';
+  h+='<div class="stat-card amber"><div class="stat-icon">📦</div><div class="stat-label">库存中</div><div class="stat-value">'+stock.length+'</div><div class="stat-sub">台</div></div>';
+  h+='<div class="stat-card blue"><div class="stat-icon">💰</div><div class="stat-label">库存成本合计</div><div class="stat-value" style="font-size:18px">'+formatMoney(stockCost)+'</div><div class="stat-sub">采购成本，未售出不算利润</div></div>';
+  h+='<div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-label">已售出</div><div class="stat-value">'+sold.length+'</div><div class="stat-sub">台</div></div>';
+  h+='<div class="stat-card green"><div class="stat-icon">📈</div><div class="stat-label">已实现利润</div><div class="stat-value" style="font-size:18px">'+formatMoney(soldProfit)+'</div><div class="stat-sub">成交价−采购成本，已计入净利润</div></div>';
+  h+='</div>';
+  h+='<div class="btn-row" style="margin-bottom:14px"><button class="btn btn-success" onclick="_editAcquiredId=null;nav(\'acquired_add\')">➕ 新增收购车辆</button></div>';
+  h+='<div class="card"><div class="table-wrap"><table><thead><tr><th>编号</th><th>来源/经手人</th><th>车辆</th><th>采购成本</th><th>采购日期</th><th>状态</th><th>成交价</th><th>利润</th><th>操作</th></tr></thead><tbody>';
+  if(list.length===0) { h+='<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--muted)">暂无收购车辆记录</td></tr>'; }
+  list.forEach(function(a){
+    var profit = acquiredProfit(a);
+    var isSold = a.status==='sold';
+    h+='<tr style="background:'+(isSold?'#f5fbf5':'')+'">';
+    h+='<td style="font-weight:700;color:var(--sky);font-size:12px;white-space:nowrap">'+a.id+'</td>';
+    h+='<td>'+(a.name||'—')+'</td>';
+    h+='<td><div style="font-weight:600">'+(a.plate||'')+'</div><div style="font-size:11px;color:var(--muted)">'+(a.brand||'')+(a.model?' '+a.model:'')+(a.color?' · '+a.color:'')+'</div></td>';
+    h+='<td style="font-weight:700;color:#1565c0">'+formatMoney(a.amount||0)+'</td>';
+    h+='<td style="font-size:12px;color:var(--muted)">'+formatDate(a.date)+'</td>';
+    h+='<td>'+(isSold?'<span class="badge badge-green">已售出</span>':'<span class="badge badge-amber">库存中</span>')+'</td>';
+    h+='<td style="font-weight:600">'+(isSold?formatMoney(a.saleAmount||0):'—')+'</td>';
+    h+='<td style="font-weight:700;color:'+(profit==null?'#9e9e9e':(profit>=0?'#2e7d32':'#c62828'))+'">'+(profit==null?'—（未售出）':formatMoney(profit))+'</td>';
+    h+='<td style="white-space:nowrap">';
+    h+='<button class="btn btn-sm btn-primary" onclick="editAcquired(\''+a.id+'\')">✏️ 编辑</button> ';
+    if(!isSold) h+='<button class="btn btn-sm btn-success" onclick="renderSellForm(\''+a.id+'\')">💰 标记已售出</button> ';
+    h+='<button class="btn btn-sm btn-danger" onclick="deleteAcquired(\''+a.id+'\')">删除</button>';
+    h+='</td></tr>';
+  });
+  h+='</tbody></table></div></div>';
+  document.getElementById('mainContent').innerHTML = h;
+}
+
+function renderAcquiredForm(data) {
+  var isEdit = !!data;
+  var d = data || {};
+  var h='';
+  h+='<div class="page-header"><div class="page-title">'+(isEdit?'✏️ 编辑收购车辆':'➕ 新增收购车辆')+'</div><div class="page-sub">公司收购/买断持有，尚未计入贷款业务，售出前不产生利润</div></div>';
+  h+='<div class="card"><div class="card-title" style="margin-bottom:12px">🚗 车辆信息</div><div class="form-grid">';
+  h+='<div class="form-group"><label>来源/经手人</label><input type="text" id="a_name" value="'+(d.name||'')+'" placeholder="如：卖家姓名或经手业务员"></div>';
+  h+='<div class="form-group"><label>手机号</label><input type="text" id="a_phone" value="'+(d.phone||'')+'" placeholder="可选"></div>';
+  h+='<div class="form-group"><label>车牌号 *</label><input type="text" id="a_plate" value="'+(d.plate||'')+'" placeholder="如：MHMXF.20"></div>';
+  h+='<div class="form-group"><label>车辆品牌</label><input type="text" id="a_brand" value="'+(d.brand||'')+'" placeholder="如：大G"></div>';
+  h+='<div class="form-group"><label>车辆型号</label><input type="text" id="a_model" value="'+(d.model||'')+'" placeholder="可选"></div>';
+  h+='<div class="form-group"><label>车辆颜色</label><input type="text" id="a_color" value="'+(d.color||'')+'" placeholder="如：黑色"></div>';
+  h+='</div></div>';
+  h+='<div class="card"><div class="card-title" style="margin-bottom:12px">💰 采购信息</div><div class="form-grid">';
+  h+='<div class="form-group"><label>采购成本（$）*</label><input type="number" id="a_amount" value="'+(d.amount||'')+'" placeholder="0" min="0" step="0.01"></div>';
+  h+='<div class="form-group"><label>采购日期</label><input type="date" id="a_date" value="'+(d.date||new Date().toISOString().slice(0,10))+'"></div>';
+  h+='<div class="form-group span3"><label>备注</label><textarea id="a_note" placeholder="其他需要记录的信息...">'+(d.note||'')+'</textarea></div>';
+  h+='</div></div>';
+  h+='<div class="btn-row"><button class="btn btn-primary" onclick="saveAcquired()">✅ 保存</button>';
+  h+='<button class="btn btn-outline" onclick="nav(\'acquired_list\')">🚙 查看收购车辆列表</button></div>';
+  document.getElementById('mainContent').innerHTML = h;
+}
+
+async function saveAcquired() {
+  var plate = document.getElementById("a_plate")?.value.trim();
+  var amount = parseFloat(document.getElementById("a_amount")?.value);
+  if(!plate) { alert("请输入车牌号"); return; }
+  if(!amount || amount<=0) { alert("请输入有效的采购成本"); return; }
+  var data = {
+    assetType:"acquired",
+    name: document.getElementById("a_name")?.value.trim()||"",
+    phone: document.getElementById("a_phone")?.value.trim()||"",
+    plate: plate,
+    brand: document.getElementById("a_brand")?.value.trim()||"",
+    model: document.getElementById("a_model")?.value.trim()||"",
+    color: document.getElementById("a_color")?.value.trim()||"",
+    amount: amount,
+    actualAmount: amount,
+    date: document.getElementById("a_date")?.value||new Date().toISOString().slice(0,10),
+    note: document.getElementById("a_note")?.value.trim()||""
+  };
+  if(_editAcquiredId) {
+    for(var i=0;i<_loans.length;i++) { if(_loans[i].id===_editAcquiredId) { for(var k in data) _loans[i][k]=data[k]; break; } }
+    alert("✅ 收购车辆信息已更新");
+  } else {
+    data.id = genAcquiredId();
+    data.status = "in_stock";
+    _loans.unshift(data);
+    alert("✅ 新增收购车辆成功 编号："+data.id);
+  }
+  saveLoans(); _editAcquiredId=null; nav("acquired_list");
+}
+
+function editAcquired(id) {
+  for(var i=0;i<_loans.length;i++) { if(_loans[i].id===id) { _editAcquiredId=id; renderAcquiredForm(_loans[i]); return; } }
+}
+
+async function deleteAcquired(id) {
+  if(!confirm("确定删除收购车辆编号 "+id+" 的记录？关联的销售利润流水也会一并删除。")) return;
+  _loans = _loans.filter(function(l){ return l.id!==id; });
+  _financeRecords = _financeRecords.filter(function(r){ return r.loanId!==id; });
+  saveLoans(); saveFinance(); renderAcquiredList();
+}
+
+function renderSellForm(id) {
+  var a = _loans.find(function(l){ return l.id===id; });
+  if(!a) return;
+  var h='';
+  h+='<div class="page-header"><div class="page-title">💰 标记已售出</div><div class="page-sub">'+a.id+' · '+(a.brand||'')+' '+(a.plate||'')+' · 采购成本 '+formatMoney(a.amount||0)+'</div></div>';
+  h+='<div class="card"><div class="form-grid">';
+  h+='<div class="form-group"><label>成交价（$）*</label><input type="number" id="s_amount" placeholder="0" min="0" step="0.01"></div>';
+  h+='<div class="form-group"><label>成交日期</label><input type="date" id="s_date" value="'+new Date().toISOString().slice(0,10)+'"></div>';
+  h+='<div class="form-group"><label>额外支出（$）<span style="font-size:11px;color:var(--muted);font-weight:400">维修/整备等，可选</span></label><input type="number" id="s_extra" value="'+(a.extraCost||0)+'" placeholder="0" min="0" step="0.01"></div>';
+  h+='<div class="form-group span3"><label>备注</label><textarea id="s_note" placeholder="成交细节..."></textarea></div>';
+  h+='</div></div>';
+  h+='<div class="btn-row"><button class="btn btn-primary" onclick="confirmSell(\''+id+'\')">✅ 确认售出</button>';
+  h+='<button class="btn btn-outline" onclick="nav(\'acquired_list\')">取消</button></div>';
+  document.getElementById('mainContent').innerHTML = h;
+}
+
+async function confirmSell(id) {
+  var a = _loans.find(function(l){ return l.id===id; });
+  if(!a) return;
+  var saleAmount = parseFloat(document.getElementById("s_amount")?.value);
+  if(!saleAmount || saleAmount<=0) { alert("请输入有效的成交价"); return; }
+  var extraCost = parseFloat(document.getElementById("s_extra")?.value)||0;
+  var saleDate = document.getElementById("s_date")?.value||new Date().toISOString().slice(0,10);
+  var note = document.getElementById("s_note")?.value.trim()||"";
+  a.status = "sold";
+  a.saleAmount = saleAmount;
+  a.extraCost = extraCost;
+  a.saleDate = saleDate;
+  var profit = saleAmount - (a.amount||0) - extraCost;
+  // 售出后自动生成一笔"其他收入"财务记录，自动计入净利润（未售出前不产生任何利润）
+  _financeRecords = _financeRecords.filter(function(r){ return !(r.loanId===id && r.category==='收购车辆销售利润'); });
+  _financeRecords.unshift({
+    id: "F"+Date.now(),
+    type: "income",
+    amount: profit,
+    category: "收购车辆销售利润",
+    date: saleDate,
+    loanId: id,
+    note: "收购车辆售出："+(a.brand||'')+' '+(a.plate||'')+"，成交价"+formatMoney(saleAmount)+(extraCost?"，额外支出"+formatMoney(extraCost):"")+(note?"。"+note:"")
+  });
+  await saveLoans(); await saveFinance();
+  alert("✅ 已标记售出，利润 "+formatMoney(profit)+" 已自动计入净利润");
+  nav("acquired_list");
 }
 
 function onLoanSelect() {
@@ -1297,14 +1487,15 @@ function renderFinancePnL() {
   if(!selMonth) selMonth = now.getFullYear()+'-'+(String(now.getMonth()+1).padStart(2,'0'));
   function inMonth(d,ym){ return d&&String(d).slice(0,7)===ym; }
 
-  var activeLoans  = _loans.filter(function(l){return l.status==='active';});
-  var overdueLoans = _loans.filter(function(l){return l.status==='overdue';});
-  var closedLoans  = _loans.filter(function(l){return l.status==='closed';});
-  var pendingLoans = _loans.filter(function(l){return l.status==='pending';});
-  var inBetLoans   = _loans.filter(function(l){return l.status==='active'||l.status==='overdue';});
+  var _lr = loanRecords();
+  var activeLoans  = _lr.filter(function(l){return l.status==='active';});
+  var overdueLoans = _lr.filter(function(l){return l.status==='overdue';});
+  var closedLoans  = _lr.filter(function(l){return l.status==='closed';});
+  var pendingLoans = _lr.filter(function(l){return l.status==='pending';});
+  var inBetLoans   = _lr.filter(function(l){return l.status==='active'||l.status==='overdue';});
 
   var totalPrincipal = inBetLoans.reduce(function(s,l){return s+l.amount;},0);
-  var monthNewLoans  = _loans.filter(function(l){return inMonth(l.date,selMonth);});
+  var monthNewLoans  = _lr.filter(function(l){return inMonth(l.date,selMonth);});
   var monthNewAmount = monthNewLoans.reduce(function(s,l){return s+l.amount;},0);
   var monthNewActual = monthNewLoans.reduce(function(s,l){return s+(l.actualAmount||l.amount*(1-(l.haircut||9.5)/100));},0);
   // 砍头息 = 贷款金额 - 实际放款（精确计算，不用默认9.5%）
@@ -1339,9 +1530,9 @@ function renderFinancePnL() {
   recInc.forEach(function(r){incByCat[r.category]=(incByCat[r.category]||0)+r.amount;});
   recExp.forEach(function(r){expByCat[r.category]=(expByCat[r.category]||0)+r.amount;});
   var netProfit = monthHaircut + manInc - manExp; // 砍头息+利息收入-支出（不含本金回收）
-  var totalLoansActive = _loans.filter(function(l){return l.status!=='pending';}).length;
+  var totalLoansActive = _lr.filter(function(l){return l.status!=='pending';}).length;
   var overdueRate = totalLoansActive>0 ? (overdueLoans.length/totalLoansActive*100).toFixed(1) : 0;
-  var grandTotal = _loans.reduce(function(s,l){return s+l.amount;},0);
+  var grandTotal = _lr.reduce(function(s,l){return s+l.amount;},0);
 
   var months=[];
   for(var mi=0;mi<8;mi++){
@@ -1431,7 +1622,7 @@ function renderFinancePnL() {
     var pct=grandTotal>0?(amt/grandTotal*100).toFixed(1):0;
     h+='<tr><td style="font-weight:600;color:'+g.color+'">'+g.label+'</td><td>'+g.list.length+'笔</td><td style="font-weight:600">$'+amt.toLocaleString()+'</td><td>'+pct+'%</td></tr>';
   });
-  h+='<tr style="font-weight:700;background:#f5f5f5"><td>合计</td><td>'+_loans.length+'笔</td><td>$'+grandTotal.toLocaleString()+'</td><td>100%</td></tr>';
+  h+='<tr style="font-weight:700;background:#f5f5f5"><td>合计</td><td>'+_lr.length+'笔</td><td>$'+grandTotal.toLocaleString()+'</td><td>100%</td></tr>';
   h+='</tbody></table></div></div>';
 
   h+='<div class="btn-row">';
