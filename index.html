@@ -870,6 +870,14 @@ function loanComprehensiveInterestPct(l) {
   if(!base) return 0;
   return Math.round(loanComprehensiveInterest(l)/base*10000)/100;
 }
+// ══ 实际月利息率 = 综合利息占实际放款的比例，平摊到每个月 ══
+// 砍头息是放款那一刻一次性收的，但它本质上也是这笔钱的利息成本，只是提前收了；
+// 把"砍头息+整期利息"这笔综合利息，平摊到合同的每一期（每个月），才是这笔单子
+// 真正的月利息率——比单看"月利率%"这个字段（只算了分期利息，没算砍头）更准。
+function loanEffectiveMonthlyRate(l) {
+  var term = l.term || 1;
+  return Math.round(loanComprehensiveInterestPct(l)/term*100)/100;
+}
 
 // ══ 收购车辆（公司收购持有，等待转卖的车） vs 抵押车辆（放贷抵押车）══
 // 两者共用 _loans 数组/car_loans 存储，用 assetType==='acquired' 区分，
@@ -1332,6 +1340,7 @@ function calcPreview() {
   var haircutAmt = Math.round((amount-res.actual)*100)/100;
   var comprehensive = Math.round((haircutAmt+res.totalInterest)*100)/100;
   var comprehensivePct = res.actual ? Math.round(comprehensive/res.actual*10000)/100 : 0;
+  var effMonthlyRate = term ? Math.round(comprehensivePct/term*100)/100 : 0;
   box.style.display="block";
   box.innerHTML =
     "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px\">" +
@@ -1340,7 +1349,7 @@ function calcPreview() {
     "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">总利息（不含砍头）</div><div style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+res.totalInterest.toFixed(2)+"</div></div>" +
     "<div style=\"background:#fce4ec;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">应总还款</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">$"+res.totalRepay.toFixed(2)+"</div></div>" +
     "<div style=\"background:#f3e5f5;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">砍头息</div><div style=\"font-size:18px;font-weight:700;color:#8e24aa\">$"+haircutAmt.toFixed(2)+"</div></div>" +
-    "<div style=\"background:#ffebee;border-radius:8px;padding:10px;text-align:center;border:1.5px solid #ef9a9a\"><div style=\"font-size:11px;color:#546e7a\">🧮 综合利息（砍头+总利息）</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">$"+comprehensive.toFixed(2)+"</div><div style=\"font-size:10px;color:#546e7a\">占实际放款 "+comprehensivePct+"%</div></div>" +
+    "<div style=\"background:#ffebee;border-radius:8px;padding:10px;text-align:center;border:1.5px solid #ef9a9a\"><div style=\"font-size:11px;color:#546e7a\">🧮 实际月利率（砍头+总利息平摊到每月）</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">"+effMonthlyRate+"%</div><div style=\"font-size:10px;color:#546e7a\">综合利息 $"+comprehensive.toFixed(2)+"（占实放"+comprehensivePct+"%）</div></div>" +
     "</div>" +
     "<div style=\"overflow-x:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><thead><tr style=\"background:#f5f5f5\"><th style=\"padding:6px 8px;text-align:left\">期数</th><th style=\"padding:6px 8px;text-align:left\">本金</th><th style=\"padding:6px 8px;text-align:left\">利息</th><th style=\"padding:6px 8px;text-align:left\">合计</th></tr></thead><tbody>" +
     scheduleRows + "</tbody></table></div>";
@@ -1415,6 +1424,7 @@ function renderActualSchedule(d) {
   var haircutAmt = loanHaircutAmount(d);
   var comprehensive = loanComprehensiveInterest(d);
   var comprehensivePct = loanComprehensiveInterestPct(d);
+  var effMonthlyRate = loanEffectiveMonthlyRate(d);
   box.style.display = "block";
   box.innerHTML =
     "<div style=\"font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px\">📋 实际还款记录（合同已保存数据，非公式计算）</div>" +
@@ -1423,7 +1433,7 @@ function renderActualSchedule(d) {
     "<div style=\"background:#e3f2fd;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">实际放款</div><div style=\"font-size:18px;font-weight:700;color:#1565c0\">$"+Number(d.actualAmount||0).toFixed(2)+"</div></div>" +
     "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">总利息（不含砍头）</div><div style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+Number(d.totalInterest||0).toFixed(2)+"</div></div>" +
     "<div style=\"background:#f3e5f5;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">砍头息</div><div style=\"font-size:18px;font-weight:700;color:#8e24aa\">$"+haircutAmt.toFixed(2)+"</div></div>" +
-    "<div style=\"background:#ffebee;border-radius:8px;padding:10px;text-align:center;border:1.5px solid #ef9a9a\"><div style=\"font-size:11px;color:#546e7a\">🧮 综合利息（砍头+总利息）</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">$"+comprehensive.toFixed(2)+"</div><div style=\"font-size:10px;color:#546e7a\">占实际放款 "+comprehensivePct+"%</div></div>" +
+    "<div style=\"background:#ffebee;border-radius:8px;padding:10px;text-align:center;border:1.5px solid #ef9a9a\"><div style=\"font-size:11px;color:#546e7a\">🧮 实际月利率（砍头+总利息平摊到每月）</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">"+effMonthlyRate+"%</div><div style=\"font-size:10px;color:#546e7a\">综合利息 $"+comprehensive.toFixed(2)+"（占实放"+comprehensivePct+"%）</div></div>" +
     "</div>" +
     "<div style=\"overflow-x:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><thead><tr style=\"background:#f5f5f5\"><th style=\"padding:6px 8px;text-align:left\">期数</th><th style=\"padding:6px 8px;text-align:left\">本金</th><th style=\"padding:6px 8px;text-align:left\">利息</th><th style=\"padding:6px 8px;text-align:left\">合计</th></tr></thead><tbody>" +
     rows + "</tbody></table></div>";
@@ -1580,7 +1590,7 @@ function filterList() {
         h+='<div class="loan-card-row"><span class="loan-card-lbl">💰 贷款金额</span><span class="loan-card-val" style="color:var(--sky)">'+formatMoney(l.amount)+'</span></div>';
         h+='<div class="loan-card-row"><span class="loan-card-lbl">💵 月利息</span><span class="loan-card-val">$'+(l.monthly||0).toFixed(2)+' · '+(l.repay||'等额本息')+'</span></div>';
         h+='<div class="loan-card-row"><span class="loan-card-lbl">📋 砍头%</span><span class="loan-card-val">'+(l.haircut||0)+'% · 实放$'+(l.actualAmount||0).toLocaleString()+'</span></div>';
-        h+='<div class="loan-card-row"><span class="loan-card-lbl">🧮 综合利息</span><span class="loan-card-val" style="color:#c62828;font-weight:700">$'+loanComprehensiveInterest(l).toFixed(2)+' · 占实放'+loanComprehensiveInterestPct(l)+'%</span></div>';
+        h+='<div class="loan-card-row"><span class="loan-card-lbl">🧮 实际月利率</span><span class="loan-card-val" style="color:#c62828;font-weight:700">'+loanEffectiveMonthlyRate(l)+'%/月 · 综合$'+loanComprehensiveInterest(l).toFixed(2)+'</span></div>';
         h+='<div class="loan-card-btns">'+(canWriteLoans()?'<button class="btn btn-primary" onclick="editLoan(\''+l.id+'\')">✏️ 编辑</button>':'')+(canDelete()?'<button class="btn btn-danger" onclick="deleteLoan(\''+l.id+'\')">🗑 删除</button>':'')+'</div>';
         h+='</div>';
       });
@@ -1601,7 +1611,7 @@ function filterList() {
       h+='<span style="font-weight:700;font-size:13px"><span id="ma_'+mk+'">'+(isCollapsed?'▶':'▼')+'</span> 📅 '+mk+'</span>';
       h+='<span style="font-size:12px;opacity:.8">'+gloans.length+'笔 · 贷款$'+gamt.toLocaleString()+' · 月息$'+gmon.toFixed(0)+'</span></div>';
       h+='<div id="mg_'+mk+'" style="display:'+(isCollapsed?'none':'')+';margin-bottom:10px"><div class="card" style="padding:0;overflow:hidden;border-radius:0 0 8px 8px"><div class="table-wrap"><table><thead><tr>';
-      h+='<th>#</th><th>客户姓名</th><th>手机号</th><th>车牌 / 品牌</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>月利率%</th><th>月利息</th><th>综合利息</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th>';
+      h+='<th>#</th><th>客户姓名</th><th>手机号</th><th>车牌 / 品牌</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>月利率%</th><th>月利息</th><th>实际月利率</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th>';
       h+='</tr></thead><tbody>';
       gloans.forEach(function(l){
         var sc=l.status==='overdue'?'#ffebee':l.status==='closed'?'#fafafa':l.status==='pending'?'#fff8e1':'';
@@ -1615,7 +1625,7 @@ function filterList() {
         h+='<td style="color:#f57c00">'+(l.haircut||0)+'%</td>';
         h+='<td style="color:#c62828">'+(l.rate||0)+'%</td>';
         h+='<td style="font-weight:600;color:#2e7d32">$'+(l.monthly||0).toFixed(2)+'</td>';
-        h+='<td style="font-weight:700;color:#c62828;white-space:nowrap">$'+loanComprehensiveInterest(l).toFixed(2)+'<div style="font-size:10px;color:var(--muted);font-weight:400">占实放'+loanComprehensiveInterestPct(l)+'%</div></td>';
+        h+='<td style="font-weight:700;color:#c62828;white-space:nowrap">'+loanEffectiveMonthlyRate(l)+'%/月<div style="font-size:10px;color:var(--muted);font-weight:400">综合$'+loanComprehensiveInterest(l).toFixed(2)+'</div></td>';
         h+='<td><span style="font-size:11px;background:#e3f2fd;color:#1565c0;padding:2px 7px;border-radius:10px;white-space:nowrap">'+(l.repay||'等额本息')+'</span></td>';
         h+='<td>'+statusHtml(l.status)+'</td>';
         h+='<td style="font-size:11px;color:var(--muted);white-space:nowrap">'+formatDate(l.date)+'</td>';
