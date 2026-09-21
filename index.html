@@ -592,6 +592,12 @@ async function loadAllData() {
 }
 function formatDate(d) { if(!d) return "-"; var dt=new Date(d); return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0"); }
 function formatMoney(n) { return "¥"+Number(n).toLocaleString(); }
+// 砍头息 = 贷款金额 − 实际放款金额（精确，直接用两个原始数字相减）；
+// 只有当实际放款金额缺失时，才退回用砍头%估算（砍头%本身是四舍五入过的，会有误差）
+function loanHaircutAmount(l) {
+  if(l.actualAmount!=null && l.amount>0) return l.amount - l.actualAmount;
+  return l.amount*(l.haircut||0)/100;
+}
 
 // ══ 三种还款方式计算引擎 ══
 function calcRepay(amount, rate, term, repay, haircut) {
@@ -718,6 +724,73 @@ function nav(page) {
   else if(page==="backup") { doBackup(); _currentNav="home"; buildSidebar(); buildMobNav(); }
   else if(page==="restore") { doRestore(); _currentNav="home"; buildSidebar(); buildMobNav(); }
   else if(page==="import") renderImport();
+  else if(page==="haircut_detail") renderHaircutDetail();
+  else if(page==="interest_detail") renderInterestDetail();
+  else if(page==="profit_detail") renderProfitDetail();
+}
+
+// ══ 首页数字点进去看明细 ══
+function renderHaircutDetail() {
+  var rows = _loans.map(function(l){
+    return {l:l, hc: loanHaircutAmount(l)};
+  }).sort(function(a,b){ return b.hc - a.hc; });
+  var total = rows.reduce(function(s,r){ return s+r.hc; },0);
+  var h = '<div class="page-header"><div class="page-title">✂️ 累计砍头息明细</div><div class="page-sub">砍头息 = 每笔合同的"贷款金额 × 砍头%"，按全部合同（不分状态）自动归集</div></div>';
+  h += '<div class="card" style="margin-bottom:14px"><div style="font-size:13px;color:var(--muted)">计算公式：<code>Σ(贷款金额 × 砍头% ÷ 100)</code>，逐笔相加</div></div>';
+  h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>砍头息</th><th>放款日</th></tr></thead><tbody>';
+  rows.forEach(function(r){
+    h += '<tr><td style="font-weight:600;color:var(--sky)">'+r.l.id+'</td><td>'+r.l.name+'</td><td>'+formatMoney(r.l.amount)+'</td><td>'+formatMoney(r.l.actualAmount||0)+'</td><td style="color:#f57c00">'+(r.l.haircut||0)+'%</td><td style="font-weight:700;color:#e65100">'+formatMoney(r.hc)+'</td><td style="font-size:12px;color:var(--muted)">'+formatDate(r.l.date)+'</td></tr>';
+  });
+  h += '<tr style="font-weight:700;background:#f5f5f5"><td colspan="5">合计（'+rows.length+'笔）</td><td style="color:#e65100">'+formatMoney(total)+'</td><td></td></tr>';
+  h += '</tbody></table></div></div>';
+  h += '<div class="btn-row"><button class="btn btn-outline" onclick="nav(\'home\')">← 返回首页</button></div>';
+  document.getElementById('mainContent').innerHTML = h;
+}
+
+function renderInterestDetail() {
+  var recs = _financeRecords.filter(function(r){ return r.type==='income' && r.category==='利息收入'; }).slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+  var total = recs.reduce(function(s,r){ return s+r.amount; },0);
+  var h = '<div class="page-header"><div class="page-title">💰 累计利息收入明细</div><div class="page-sub">"收入登记"里分类为"利息收入"的记录合计（不含本金回收）</div></div>';
+  h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>日期</th><th>金额</th><th>关联合同</th><th>客户</th><th>备注</th></tr></thead><tbody>';
+  recs.forEach(function(r){
+    var loan = r.loanId ? _loans.find(function(l){ return l.id===r.loanId; }) : null;
+    h += '<tr><td>'+formatDate(r.date)+'</td><td style="font-weight:600;color:#2e7d32">'+formatMoney(r.amount)+'</td><td>'+(r.loanId||'—')+'</td><td>'+(loan?loan.name:'—')+'</td><td style="color:var(--muted);font-size:12px">'+(r.note||'')+'</td></tr>';
+  });
+  h += '<tr style="font-weight:700;background:#f5f5f5"><td>合计（'+recs.length+'笔）</td><td style="color:#2e7d32">'+formatMoney(total)+'</td><td colspan="3"></td></tr>';
+  h += '</tbody></table></div></div>';
+  h += '<div class="btn-row"><button class="btn btn-outline" onclick="nav(\'home\')">← 返回首页</button></div>';
+  document.getElementById('mainContent').innerHTML = h;
+}
+
+function renderProfitDetail() {
+  var totalInterestIncome = _financeRecords.filter(function(r){return r.type==="income" && r.category==="利息收入";}).reduce(function(s,r){return s+r.amount;},0);
+  var totalHaircut = _loans.reduce(function(s,l){return s+loanHaircutAmount(l);},0);
+  var otherRecs = _financeRecords.filter(function(r){return r.type==="income" && r.category!=="利息收入" && r.category!=="本金回收";});
+  var totalOtherIncome = otherRecs.reduce(function(s,r){return s+r.amount;},0);
+  var expRecs = _financeRecords.filter(function(r){return r.type==="expense";});
+  var totalExpense = expRecs.reduce(function(s,r){return s+r.amount;},0);
+  var prinRecov = _financeRecords.filter(function(r){return r.type==="income" && r.category==="本金回收";}).reduce(function(s,r){return s+r.amount;},0);
+  var profit = totalHaircut + totalInterestIncome + totalOtherIncome - totalExpense;
+
+  function row(label,amount,color,note,link){
+    return '<tr><td>'+(link?'<a href="javascript:void(0)" onclick="nav(\''+link+'\')" style="color:var(--sky);text-decoration:underline">'+label+'</a>':label)+'</td><td style="text-align:right;font-weight:700;color:'+color+'">'+formatMoney(amount)+'</td><td style="font-size:11px;color:var(--muted)">'+note+'</td></tr>';
+  }
+  var h = '<div class="page-header"><div class="page-title">📈 净利润是怎么算出来的</div><div class="page-sub">净利润 = 砍头息 + 利息收入 + 其他收入 − 运营支出（本金回收不计入）</div></div>';
+  h += '<div class="card"><table style="width:100%;border-collapse:collapse">';
+  h += row('① 砍头息合计（点击看每笔合同）', totalHaircut, '#e65100', 'Σ(贷款金额×砍头%)，全部合同自动归集', 'haircut_detail');
+  h += row('② 利息收入合计（点击看每笔流水）', totalInterestIncome, '#2e7d32', '"收入登记"里分类=利息收入的记录之和', 'interest_detail');
+  h += row('③ 其他收入合计', totalOtherIncome, '#2e7d32', '手续费/滞纳金/其他收入等分类（不含利息收入、本金回收）', null);
+  h += row('④ 运营支出合计（点击看每笔流水）', -totalExpense, '#c62828', '"支出登记"里的记录之和', 'finance_expense');
+  h += '<tr style="border-top:2px solid #333"><td style="font-weight:700;padding-top:10px">净利润 = ① + ② + ③ − ④</td><td style="text-align:right;font-weight:700;padding-top:10px;color:'+(profit>=0?'#2e7d32':'#c62828')+'">'+formatMoney(profit)+'</td><td></td></tr>';
+  h += '</table></div>';
+  h += '<div class="card"><div style="font-size:12px;color:var(--muted)">⚠️ 本金回收（累计 '+formatMoney(prinRecov)+'）不计入净利润，只是资金回流——客户还的本金本来就是你放出去的钱，收回来不是赚的。</div></div>';
+  if(otherRecs.length>0) {
+    h += '<div class="card"><div class="card-title" style="margin-bottom:10px">③ 其他收入明细</div><div class="table-wrap"><table><thead><tr><th>日期</th><th>分类</th><th>金额</th><th>备注</th></tr></thead><tbody>';
+    otherRecs.forEach(function(r){ h += '<tr><td>'+formatDate(r.date)+'</td><td>'+r.category+'</td><td style="font-weight:600;color:#2e7d32">'+formatMoney(r.amount)+'</td><td style="font-size:12px;color:var(--muted)">'+(r.note||'')+'</td></tr>'; });
+    h += '</tbody></table></div></div>';
+  }
+  h += '<div class="btn-row"><button class="btn btn-outline" onclick="nav(\'home\')">← 返回首页</button></div>';
+  document.getElementById('mainContent').innerHTML = h;
 }
 
 function renderHome() {
@@ -730,7 +803,7 @@ function renderHome() {
   var activeAmt = _loans.filter(function(l){return l.status!=="closed"}).reduce(function(s,l){return s+l.amount},0);
   // 利息收入 + 砍头息（从合同自动归集）
   var totalInterestIncome = _financeRecords.filter(function(r){return r.type==="income" && r.category==="利息收入";}).reduce(function(s,r){return s+r.amount;},0);
-  var totalHaircut = _loans.reduce(function(s,l){return s+l.amount*(l.haircut||0)/100;},0);
+  var totalHaircut = _loans.reduce(function(s,l){return s+loanHaircutAmount(l);},0);
   var totalOtherIncome = _financeRecords.filter(function(r){return r.type==="income" && r.category!=="利息收入" && r.category!=="本金回收";}).reduce(function(s,r){return s+r.amount;},0);
   // 本金回收不计入利润（只是资金回流）
   var totalPrinRecov = _financeRecords.filter(function(r){return r.type==="income" && r.category==="本金回收";}).reduce(function(s,r){return s+r.amount;},0);
@@ -746,10 +819,10 @@ function renderHome() {
   h += '<div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-label">还款中</div><div class="stat-value">'+active+'</div><div class="stat-sub">笔</div></div>';
   h += '<div class="stat-card amber"><div class="stat-icon">⏳</div><div class="stat-label">审核中</div><div class="stat-value">'+pending+'</div><div class="stat-sub">笔</div></div>';
   h += '<div class="stat-card red"><div class="stat-icon">⚠️</div><div class="stat-label">已逾期</div><div class="stat-value">'+overdue+'</div><div class="stat-sub">笔</div></div>';
-  h += '<div class="stat-card purple"><div class="stat-icon">💰</div><div class="stat-label">累计利息收入</div><div class="stat-value">'+formatMoney(totalInterestIncome)+'</div><div class="stat-sub">不含本金回收</div></div>';
-  h += '<div class="stat-card amber"><div class="stat-icon">✂️</div><div class="stat-label">累计砍头息</div><div class="stat-value">'+formatMoney(totalHaircut)+'</div><div class="stat-sub">合同自动归集</div></div>';
-  h += '<div class="stat-card blue"><div class="stat-icon">💸</div><div class="stat-label">累计支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div><div class="stat-sub">运营成本</div></div>';
-  h += '<div class="stat-card green"><div class="stat-icon">📈</div><div class="stat-label">净利润</div><div class="stat-value">'+formatMoney(profit)+'</div><div class="stat-sub">'+(profit>=0?'盈利':'亏损')+' · 砍头息+利息-支出</div></div>';
+  h += '<div class="stat-card purple" style="cursor:pointer" onclick="nav(\'interest_detail\')"><div class="stat-icon">💰</div><div class="stat-label">累计利息收入</div><div class="stat-value">'+formatMoney(totalInterestIncome)+'</div><div class="stat-sub">不含本金回收 · 点击查看明细</div></div>';
+  h += '<div class="stat-card amber" style="cursor:pointer" onclick="nav(\'haircut_detail\')"><div class="stat-icon">✂️</div><div class="stat-label">累计砍头息</div><div class="stat-value">'+formatMoney(totalHaircut)+'</div><div class="stat-sub">合同自动归集 · 点击查看明细</div></div>';
+  h += '<div class="stat-card blue" style="cursor:pointer" onclick="nav(\'finance_expense\')"><div class="stat-icon">💸</div><div class="stat-label">累计支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div><div class="stat-sub">运营成本 · 点击查看明细</div></div>';
+  h += '<div class="stat-card green" style="cursor:pointer" onclick="nav(\'profit_detail\')"><div class="stat-icon">📈</div><div class="stat-label">净利润</div><div class="stat-value">'+formatMoney(profit)+'</div><div class="stat-sub">'+(profit>=0?'盈利':'亏损')+' · 点击查看计算过程</div></div>';
   h += '<div class="stat-card amber"><div class="stat-icon">🏦</div><div class="stat-label">在贷余额</div><div class="stat-value">'+formatMoney(activeAmt)+'</div><div class="stat-sub">未结清</div></div>';
   h += "</div>";
 
@@ -865,7 +938,35 @@ function renderAddForm(data) {
   document.getElementById("mainContent").innerHTML = h;
   // 绑定手动覆盖检测
   window._lastEdit = d.actualAmount ? "actual" : "haircut";
-  setTimeout(calcPreview, 50);
+  // 编辑已有合同且带有真实还款记录时，先展示真实数据，不要用公式覆盖；
+  // 一旦用户改动金额/利率/期数/方式等字段，会自动切回理论计算器（calcPreview）
+  if(isEdit && d.schedule && d.schedule.length) {
+    setTimeout(function(){ renderActualSchedule(d); }, 50);
+  } else {
+    setTimeout(calcPreview, 50);
+  }
+}
+
+// 展示合同已保存的真实还款记录（导入/历史数据），与"理论计算器"区分开，
+// 避免误把calcRepay()现算的等额本息公式当成真实还款金额
+function renderActualSchedule(d) {
+  var box = document.getElementById("calcPreviewBox"); if(!box) return;
+  var rows = "";
+  var sch = d.schedule || [];
+  for(var i=0;i<sch.length;i++) {
+    var s = sch[i];
+    rows += "<tr><td>第"+s.period+"期</td><td>$"+Number(s.principal||0).toFixed(2)+"</td><td>$"+Number(s.interest||0).toFixed(2)+"</td><td style=\"font-weight:600\">$"+Number(s.total||0).toFixed(2)+"</td></tr>";
+  }
+  box.style.display = "block";
+  box.innerHTML =
+    "<div style=\"font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px\">📋 实际还款记录（合同已保存数据，非公式计算）</div>" +
+    "<div style=\"font-size:11px;color:var(--muted);margin-bottom:10px\">以下为该合同保存的真实数据。若修改上方金额/利率/期数/还款方式等字段，将自动切换为理论等额本息计算器（仅供参考，不代表实际还款）。</div>" +
+    "<div style=\"display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px\">" +
+    "<div style=\"background:#e3f2fd;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">实际放款</div><div style=\"font-size:18px;font-weight:700;color:#1565c0\">$"+Number(d.actualAmount||0).toFixed(2)+"</div></div>" +
+    "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">总利息</div><div style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+Number(d.totalInterest||0).toFixed(2)+"</div></div>" +
+    "</div>" +
+    "<div style=\"overflow-x:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><thead><tr style=\"background:#f5f5f5\"><th style=\"padding:6px 8px;text-align:left\">期数</th><th style=\"padding:6px 8px;text-align:left\">本金</th><th style=\"padding:6px 8px;text-align:left\">利息</th><th style=\"padding:6px 8px;text-align:left\">合计</th></tr></thead><tbody>" +
+    rows + "</tbody></table></div>";
 }
 
 async function saveLoan() {
