@@ -222,6 +222,7 @@ html,body{overflow:auto;height:auto}
   <div class="mob-more-item" onclick="closeMobMore();nav('finance_expense')"><span class="mmi">💸</span>支出登记</div>
   <div class="mob-divider"></div>
   <div class="mob-more-item" onclick="closeMobMore();nav('import')"><span class="mmi">📥</span>批量导入</div>
+  <div class="mob-more-item" onclick="closeMobMore();nav('user_manage')"><span class="mmi">👥</span>账号管理</div>
   <div class="mob-more-item" onclick="closeMobMore();doBackup()"><span class="mmi">💾</span>备份数据</div>
   <div class="mob-more-item" onclick="closeMobMore();doRestore()"><span class="mmi">📂</span>恢复数据</div>
 </div>
@@ -353,6 +354,140 @@ function doRestore() {
     };reader.readAsText(file);
   };inp.click();
 }
+// ══════════════════════════════════════════════
+// ══ 账号管理（老板专属）══
+// 账号数据全部存在服务器数据库里，这里只是读/写 /api/users* 这几个接口，
+// 真正的权限校验（谁能改、不能自锁老板账号等）都在服务器做了一遍，
+// 前端这套只是配合显示，不是安全边界。
+// ══════════════════════════════════════════════
+var _users = [];
+var _userFormOpen = false;
+
+async function apiUsersCall(path, method, body) {
+  try {
+    var res = await fetch(path, {
+      method: method||"GET",
+      headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
+      body: body!==undefined ? JSON.stringify(body) : undefined
+    });
+    if(res.status===401) { showLoginScreen("登录已过期，请重新登录"); return null; }
+    var data = null;
+    try { data = await res.json(); } catch(e) { data = {}; }
+    if(!res.ok || data.ok===false) { alert("❌ "+(data.message||"操作失败")); return null; }
+    return data;
+  } catch(e) { alert("❌ 网络错误，请重试"); return null; }
+}
+
+async function loadUsers() {
+  var data = await apiUsersCall("/api/users");
+  _users = (data && data.users) || [];
+}
+
+async function renderUserManage() {
+  if(!isBoss()) { alert("⛔ 只有老板能管理账号"); nav("home"); return; }
+  document.getElementById('mainContent').innerHTML = '<div class="card" style="text-align:center;padding:50px;color:var(--muted)">加载中...</div>';
+  await loadUsers();
+  renderUserManageBody();
+}
+
+function renderUserManageBody() {
+  var h='';
+  h+='<div class="page-header"><div class="page-title">👥 账号管理</div><div class="page-sub">自己新增/管理员工登录账号，改完立即生效，不用找人改代码</div></div>';
+
+  var stats = {boss:0, finance:0, sales:0};
+  _users.forEach(function(u){ if(stats[u.role]!==undefined) stats[u.role]++; });
+  h+='<div class="stats-grid" style="margin-bottom:14px">';
+  h+='<div class="stat-card blue"><div class="stat-icon">👑</div><div class="stat-label">老板</div><div class="stat-value">'+stats.boss+'</div><div class="stat-sub">人</div></div>';
+  h+='<div class="stat-card amber"><div class="stat-icon">💼</div><div class="stat-label">财务</div><div class="stat-value">'+stats.finance+'</div><div class="stat-sub">人</div></div>';
+  h+='<div class="stat-card green"><div class="stat-icon">🧑‍💼</div><div class="stat-label">业务员</div><div class="stat-value">'+stats.sales+'</div><div class="stat-sub">人</div></div>';
+  h+='</div>';
+
+  h+='<div class="btn-row" style="margin-bottom:14px"><button class="btn btn-success" onclick="_userFormOpen=!_userFormOpen;renderUserManageBody()">'+(_userFormOpen?'✖ 取消新增':'➕ 新增账号')+'</button></div>';
+
+  if(_userFormOpen) {
+    h+='<div class="card"><div class="card-title" style="margin-bottom:12px">➕ 新增员工账号</div><div class="form-grid">';
+    h+='<div class="form-group"><label>用户名（登录用）*</label><input type="text" id="u_username" placeholder="如：xiaoli，用于登录，不能重复"></div>';
+    h+='<div class="form-group"><label>显示姓名</label><input type="text" id="u_displayName" placeholder="如：小李，不填则用用户名"></div>';
+    h+='<div class="form-group"><label>角色 *</label><select id="u_role"><option value="sales">业务员</option><option value="finance">财务</option><option value="boss">老板</option></select></div>';
+    h+='<div class="form-group"><label>初始密码 *</label><input type="text" id="u_password" placeholder="至少4位，之后本人可让老板重置"></div>';
+    h+='</div>';
+    h+='<div class="btn-row"><button class="btn btn-primary" onclick="createUserAccount()">✅ 保存账号</button></div></div>';
+  }
+
+  var groups = [["boss","👑 老板"], ["finance","💼 财务"], ["sales","🧑‍💼 业务员"]];
+  groups.forEach(function(g){
+    var role = g[0], label = g[1];
+    var list = _users.filter(function(u){ return u.role===role; });
+    h+='<div class="card"><div class="card-title" style="margin-bottom:12px">'+label+'（'+list.length+'人）</div>';
+    h+='<div class="table-wrap"><table><thead><tr><th>用户名</th><th>显示姓名</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>';
+    if(list.length===0) { h+='<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">暂无账号</td></tr>'; }
+    list.forEach(function(u){
+      var isSelf = u.usernames.indexOf(CURRENT_USERNAME)!==-1;
+      var isActive = u.status==='active';
+      h+='<tr>';
+      h+='<td style="font-family:monospace;font-weight:600">'+u.usernames.join(' / ')+(isSelf?' <span class="badge badge-blue" style="margin-left:4px">我</span>':'')+'</td>';
+      h+='<td>'+(u.displayName||'—')+'</td>';
+      h+='<td>'+(isActive?'<span class="badge badge-green">启用中</span>':'<span class="badge badge-gray">已禁用</span>')+'</td>';
+      h+='<td style="font-size:12px;color:var(--muted)">'+formatDate(u.createdAt)+'</td>';
+      h+='<td style="white-space:nowrap">';
+      h+='<select style="font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid #cfd8dc;margin-right:6px" '+(isSelf?'disabled title="不能修改自己的角色"':'onchange="updateUserRole(\''+u.id+'\',this.value,\''+(u.displayName||u.username)+'\')"')+'>';
+      h+='<option value="boss" '+(u.role==='boss'?'selected':'')+'>老板</option>';
+      h+='<option value="finance" '+(u.role==='finance'?'selected':'')+'>财务</option>';
+      h+='<option value="sales" '+(u.role==='sales'?'selected':'')+'>业务员</option>';
+      h+='</select>';
+      h+='<button class="btn btn-sm btn-outline" onclick="promptResetPassword(\''+u.id+'\',\''+(u.displayName||u.username)+'\')">🔑 重置密码</button> ';
+      if(!isSelf) {
+        h+='<button class="btn btn-sm '+(isActive?'btn-outline':'btn-success')+'" onclick="toggleUserStatus(\''+u.id+'\',\''+u.status+'\',\''+(u.displayName||u.username)+'\')">'+(isActive?'🚫 禁用':'✅ 启用')+'</button> ';
+        h+='<button class="btn btn-sm btn-danger" onclick="deleteUserAccount(\''+u.id+'\',\''+(u.displayName||u.username)+'\')">删除</button>';
+      } else {
+        h+='<span style="color:var(--muted);font-size:12px">当前登录账号，不能自己禁用/删除</span>';
+      }
+      h+='</td></tr>';
+    });
+    h+='</tbody></table></div></div>';
+  });
+
+  document.getElementById('mainContent').innerHTML = h;
+}
+
+async function createUserAccount() {
+  var username = document.getElementById("u_username")?.value.trim();
+  var displayName = document.getElementById("u_displayName")?.value.trim();
+  var role = document.getElementById("u_role")?.value;
+  var password = document.getElementById("u_password")?.value;
+  if(!username) { alert("请输入用户名"); return; }
+  if(!password || password.length<4) { alert("密码至少4位"); return; }
+  var data = await apiUsersCall("/api/users", "POST", {username:username, displayName:displayName, role:role, password:password});
+  if(data) { alert("✅ 账号创建成功：「"+username+"」"); _userFormOpen=false; await loadUsers(); renderUserManageBody(); }
+}
+
+async function promptResetPassword(id, label) {
+  var pw = prompt("为「"+label+"」设置新密码（至少4位）：");
+  if(pw===null) return;
+  if(pw.length<4) { alert("密码至少4位"); return; }
+  var data = await apiUsersCall("/api/users/"+id+"/reset-password", "POST", {password:pw});
+  if(data) alert("✅ 密码已重置，该账号需要用新密码重新登录");
+}
+
+async function updateUserRole(id, role, label) {
+  if(!confirm("确定把「"+label+"」的角色改为「"+(ROLE_LABEL[role]||role)+"」？该账号会被强制重新登录。")) { renderUserManageBody(); return; }
+  await apiUsersCall("/api/users/"+id+"/update", "POST", {role:role});
+  await loadUsers(); renderUserManageBody();
+}
+
+async function toggleUserStatus(id, currentStatus, label) {
+  var next = currentStatus==='active' ? 'disabled' : 'active';
+  if(!confirm((next==='disabled'?"确定禁用":"确定启用")+"「"+label+"」的账号？"+(next==='disabled'?"禁用后该账号将无法登录。":""))) return;
+  var data = await apiUsersCall("/api/users/"+id+"/update", "POST", {status:next});
+  if(data) { await loadUsers(); renderUserManageBody(); }
+}
+
+async function deleteUserAccount(id, label) {
+  if(!confirm("确定删除账号「"+label+"」？删除后该账号将无法登录，此操作不可恢复。")) return;
+  var data = await apiUsersCall("/api/users/"+id, "DELETE");
+  if(data) { await loadUsers(); renderUserManageBody(); }
+}
+
 function buildMobNav() {
   var map={home:"mn_home",add:"mn_add",list:"mn_list",overdue:"mn_overdue"};
   ["mn_home","mn_add","mn_list","mn_overdue"].forEach(function(id){var el=document.getElementById(id);if(el)el.classList.remove("active");});
@@ -853,6 +988,7 @@ function buildSidebar() {
   items.push({id:"overdue", icon:"⚠️", label:"逾期催收"});
   if(isBoss()) {
     items.push({sec:"系统设置"});
+    items.push({id:"user_manage", icon:"👥", label:"账号管理"});
     items.push({id:"backup", icon:"💾", label:"备份数据"});
     items.push({id:"restore", icon:"📂", label:"恢复数据"});
   }
@@ -871,7 +1007,7 @@ function buildSidebar() {
 // ══ 页面级权限校验（前端拦截，真正的数据保护在服务器）══
 var PAGE_REQUIRES = {
   add:"writeLoans", acquired_add:"writeLoans", import:"writeLoans",
-  backup:"boss", restore:"boss",
+  backup:"boss", restore:"boss", user_manage:"boss",
   finance_pnl:"viewFinance", settlement:"viewFinance", finance_cashflow:"viewFinance",
   haircut_detail:"viewFinance", interest_detail:"viewFinance", profit_detail:"viewFinance",
   finance_income:"addFinance", finance_expense:"addFinance"
@@ -908,6 +1044,7 @@ function nav(page) {
   else if(page==="acquired_list") renderAcquiredList();
   else if(page==="acquired_add") renderAcquiredForm();
   else if(page==="settlement") renderSettlement();
+  else if(page==="user_manage") renderUserManage();
 }
 
 // ══ 首页数字点进去看明细 ══
