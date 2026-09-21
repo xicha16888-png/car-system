@@ -242,17 +242,23 @@ app.delete('/api/users/:id', auth, async (req, res) => {
 
 // ══ 每个角色对 car_loans / car_finance 两个数组的权限 ══
 // add: 能不能新增记录；edit: 能不能改已有记录；del: 能不能删除已有记录
-// sales 的 car_finance.add 是特例：只允许新增"收购车辆销售利润"这一类记录
-// （卖收购车自动生成的那笔流水），因为这属于业务员的收购车辆业务本身，
-// 不算"碰财务"；其他财务记录一律不能碰。
+// sales 的 car_finance.add 是特例（'business_repay'）：只允许新增两类财务记录——
+//   1) "收购车辆销售利润"：卖收购车自动生成的那笔流水，属于业务员的收购车辆业务本身；
+//   2) "利息收入"/"本金回收"/"滞纳金" 且必须带 loanId（关联到一个真实存在的合同）：
+//      这是"回款登记"页面用的，业务员登记客户还款，本质也是自己贷款业务的一部分，
+//      不算"碰财务"——但必须挂在具体合同上，不能凭空新增一笔不知道属于哪个客户的收入。
+// 其他财务记录（老板的"其他收入/支出登记"那些手动杂项记录）业务员一律不能碰。
 // finance 现在是完全只读：能看利润表/现金流/历史结算/收支记录，但新增/编辑/
-// 删除财务记录、贷款合同全都不行——记账只能老板（或业务员卖收购车那一笔）来做，
+// 删除财务记录、贷款合同全都不行——记账只能老板（或业务员上面那两类特例）来做，
 // 财务只负责查看/核对，不经手数据本身。
 const ROLE_PERMS = {
-  boss:    { car_loans: { add: true,  edit: true,  del: true  }, car_finance: { add: true,               edit: true,  del: true  } },
-  sales:   { car_loans: { add: true,  edit: true,  del: false }, car_finance: { add: 'acquired_sale_only', edit: false, del: false } },
-  finance: { car_loans: { add: false, edit: false, del: false }, car_finance: { add: false,               edit: false, del: false } },
+  boss:    { car_loans: { add: true,  edit: true,  del: true  }, car_finance: { add: true,             edit: true,  del: true  } },
+  sales:   { car_loans: { add: true,  edit: true,  del: false }, car_finance: { add: 'business_repay', edit: false, del: false } },
+  finance: { car_loans: { add: false, edit: false, del: false }, car_finance: { add: false,            edit: false, del: false } },
 };
+// sales 通过 'business_repay' 能新增的财务记录分类白名单；除"收购车辆销售利润"外，
+// 其余几类都必须带 loanId（见 checkKeyPermission）。
+const SALES_ALLOWED_FINANCE_CATEGORIES = ['收购车辆销售利润', '利息收入', '本金回收', '滞纳金'];
 
 function diffById(oldArr, newArr) {
   oldArr = Array.isArray(oldArr) ? oldArr : [];
@@ -278,9 +284,14 @@ function checkKeyPermission(role, key, newValue, currentData) {
   if (edited.length > 0 && !perm.edit) return { ok: false, reason: '无权修改已有记录' };
   if (added.length > 0) {
     if (perm.add === true) { /* 允许 */ }
-    else if (perm.add === 'acquired_sale_only') {
-      const bad = added.find(r => r.category !== '收购车辆销售利润');
-      if (bad) return { ok: false, reason: '业务员只能新增"收购车辆销售利润"这一类财务记录' };
+    else if (perm.add === 'business_repay') {
+      const loanIds = new Set((currentData.car_loans || []).map(l => l.id));
+      const bad = added.find(r => {
+        if (!SALES_ALLOWED_FINANCE_CATEGORIES.includes(r.category)) return true;
+        if (r.category === '收购车辆销售利润') return false; // 卖收购车那一笔，走原逻辑
+        return !r.loanId || !loanIds.has(r.loanId); // 回款记录必须关联一个真实存在的合同
+      });
+      if (bad) return { ok: false, reason: '业务员只能新增"收购车辆销售利润"或关联真实合同的回款记录（利息收入/本金回收/滞纳金）' };
     } else {
       return { ok: false, reason: '无权新增记录' };
     }
