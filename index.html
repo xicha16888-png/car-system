@@ -131,6 +131,7 @@ tr:hover td{background:#f8faff}
 .loan-card-val{font-weight:600}
 .loan-card-btns{display:flex;gap:8px;margin-top:12px}
 .loan-card-btns .btn{flex:1;padding:9px;font-size:13px;text-align:center}
+.settle-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
 @media(max-width:768px){
 html,body{overflow:auto;height:auto}
 .sidebar{display:none}
@@ -159,6 +160,7 @@ html,body{overflow:auto;height:auto}
 .btn-row .btn{flex:1;min-width:110px;padding:10px 8px}
 .page-header{margin-bottom:12px}
 .page-title{font-size:15px}
+.settle-grid{grid-template-columns:1fr;gap:10px}
 }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -216,6 +218,10 @@ var _collapsedMonths = {}; // 记录折叠状态
 var _currentNav = "home";
 var _financeRecords = [];
 var _syncStatus = "idle";
+// ══ 与投资方合作分界日 ══
+// 2026-09-01起与投资方合作分成；此日期之前的利润归结算前所有，
+// 需要"确认提取"之后不再带入合作期核算。以后如果分界日变化，改这一行即可。
+var SETTLEMENT_CUTOFF = "2026-09-01";
 
 
 function doBackup() {
@@ -228,7 +234,7 @@ function doBackup() {
   loanRecords().forEach(function(l){csv1.push([l.id,l.name,l.phone,l.idcard||"",l.brand||"",l.model||"",l.color||"",l.estimate||0,l.amount,l.actualAmount||"",l.rate,l.term,l.repay||"",l.status,l.date,(l.note||"").replace(/,/g,"；")].join(","));});
   setTimeout(function(){var a2=document.createElement("a");a2.href=URL.createObjectURL(new Blob(["﻿"+csv1.join("\n")],{type:"text/csv;charset=utf-8"}));a2.download="CAR_合同_"+today+".csv";a2.click();},300);
   var csv2 = ["编号,类型,金额,分类,日期,合同编号,备注"];
-  _financeRecords.forEach(function(r){csv2.push([r.id,r.type==="income"?"收入":"支出",r.amount,r.category,r.date,r.loanId||"",(r.note||"").replace(/,/g,"；")].join(","));});
+  _financeRecords.filter(function(r){return r.type==="income"||r.type==="expense";}).forEach(function(r){csv2.push([r.id,r.type==="income"?"收入":"支出",r.amount,r.category,r.date,r.loanId||"",(r.note||"").replace(/,/g,"；")].join(","));});
   setTimeout(function(){var a3=document.createElement("a");a3.href=URL.createObjectURL(new Blob(["﻿"+csv2.join("\n")],{type:"text/csv;charset=utf-8"}));a3.download="CAR_财务_"+today+".csv";a3.click();},600);
   setTimeout(function(){alert("✅ 备份完成！已下载3个文件");},800);
 }
@@ -624,6 +630,22 @@ function acquiredProfit(a) {
   return (a.saleAmount||0) - (a.amount||0) - (a.extraCost||0);
 }
 
+// ══ 利润结算（与投资方合作分界）══
+// 砍头息按"放款日期"归属，利息/其他收入/支出/收购车利润按"财务记录实际发生日期"归属，
+// 两者都天然带日期字段，直接用分界日切一刀即可，不需要额外改数据结构。
+function isBeforeCutoff(dateStr) { return !!dateStr && String(dateStr) < SETTLEMENT_CUTOFF; }
+function isFromCutoff(dateStr) { return !!dateStr && String(dateStr) >= SETTLEMENT_CUTOFF; }
+function computeProfitBreakdown(datePredicate) {
+  var lr = loanRecords();
+  var haircut = lr.filter(function(l){return datePredicate(l.date);}).reduce(function(s,l){return s+loanHaircutAmount(l);},0);
+  var interestIncome = _financeRecords.filter(function(r){return r.type==="income"&&r.category==="利息收入"&&datePredicate(r.date);}).reduce(function(s,r){return s+r.amount;},0);
+  var otherIncome = _financeRecords.filter(function(r){return r.type==="income"&&r.category!=="利息收入"&&r.category!=="本金回收"&&datePredicate(r.date);}).reduce(function(s,r){return s+r.amount;},0);
+  var expense = _financeRecords.filter(function(r){return r.type==="expense"&&datePredicate(r.date);}).reduce(function(s,r){return s+r.amount;},0);
+  var prinRecov = _financeRecords.filter(function(r){return r.type==="income"&&r.category==="本金回收"&&datePredicate(r.date);}).reduce(function(s,r){return s+r.amount;},0);
+  var netProfit = haircut + interestIncome + otherIncome - expense;
+  return {haircut:haircut, interestIncome:interestIncome, otherIncome:otherIncome, expense:expense, prinRecov:prinRecov, netProfit:netProfit};
+}
+
 // ══ 三种还款方式计算引擎 ══
 function calcRepay(amount, rate, term, repay, haircut) {
   // amount: 贷款金额(合同面值), rate: 月利率%, term: 期数, repay: 还款方式, haircut: 砍头比例%
@@ -712,6 +734,7 @@ function buildSidebar() {
     {id:"acquired_list", icon:"🚙", label:"收购车辆"},
     {sec:"财务管理"},
     {id:"finance_pnl", icon:"📊", label:"利润表"},
+    {id:"settlement", icon:"🧾", label:"历史结算"},
     {id:"finance_cashflow", icon:"💰", label:"现金流"},
     {id:"finance_income", icon:"💵", label:"收入登记"},
     {id:"finance_expense", icon:"💸", label:"支出登记"},
@@ -755,17 +778,44 @@ function nav(page) {
   else if(page==="profit_detail") renderProfitDetail();
   else if(page==="acquired_list") renderAcquiredList();
   else if(page==="acquired_add") renderAcquiredForm();
+  else if(page==="settlement") renderSettlement();
 }
 
 // ══ 首页数字点进去看明细 ══
-function renderHaircutDetail() {
-  var rows = loanRecords().map(function(l){
+// ══ 三个明细页统一支持"周期切换"：合作期(9/1起，默认) / 历史(9/1前) / 全部历史 ══
+// 一次提取之后，日常默认只看"合作期"，需要对账翻旧账时切到"历史"或"全部"，不用两套页面。
+function scopeDatePredicate(scope) {
+  if(scope==="pre") return isBeforeCutoff;
+  if(scope==="all") return function(){ return true; };
+  return isFromCutoff; // 默认 post
+}
+function scopeLabel(scope) {
+  if(scope==="pre") return "历史（"+SETTLEMENT_CUTOFF+" 前）";
+  if(scope==="all") return "全部历史（不分日期）";
+  return "合作期（"+SETTLEMENT_CUTOFF+" 起）";
+}
+function scopeToggleHtml(fnName, scope) {
+  var opts = [["post","合作期"],["pre","历史"],["all","全部"]];
+  var h = '<div style="display:flex;gap:6px;margin-bottom:12px">';
+  opts.forEach(function(o){
+    var active = o[0]===scope;
+    h += '<button class="btn btn-sm '+(active?'btn-primary':'btn-outline')+'" onclick="'+fnName+'(\''+o[0]+'\')">'+o[1]+'</button>';
+  });
+  h += '</div>';
+  return h;
+}
+
+function renderHaircutDetail(scope) {
+  scope = scope || "post";
+  var pred = scopeDatePredicate(scope);
+  var rows = loanRecords().filter(function(l){ return pred(l.date); }).map(function(l){
     return {l:l, hc: loanHaircutAmount(l)};
   }).sort(function(a,b){ return b.hc - a.hc; });
   var total = rows.reduce(function(s,r){ return s+r.hc; },0);
-  var h = '<div class="page-header"><div class="page-title">✂️ 累计砍头息明细</div><div class="page-sub">砍头息 = 每笔合同的"贷款金额 × 砍头%"，按全部合同（不分状态）自动归集</div></div>';
-  h += '<div class="card" style="margin-bottom:14px"><div style="font-size:13px;color:var(--muted)">计算公式：<code>Σ(贷款金额 × 砍头% ÷ 100)</code>，逐笔相加</div></div>';
+  var h = '<div class="page-header"><div class="page-title">✂️ 砍头息明细 · '+scopeLabel(scope)+'</div><div class="page-sub">砍头息 = 贷款金额 − 实际放款金额，按放款日期归属到对应周期</div></div>';
+  h += scopeToggleHtml('renderHaircutDetail', scope);
   h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>砍头息</th><th>放款日</th></tr></thead><tbody>';
+  if(rows.length===0) h += '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">此周期无记录</td></tr>';
   rows.forEach(function(r){
     h += '<tr><td style="font-weight:600;color:var(--sky)">'+r.l.id+'</td><td>'+r.l.name+'</td><td>'+formatMoney(r.l.amount)+'</td><td>'+formatMoney(r.l.actualAmount||0)+'</td><td style="color:#f57c00">'+(r.l.haircut||0)+'%</td><td style="font-weight:700;color:#e65100">'+formatMoney(r.hc)+'</td><td style="font-size:12px;color:var(--muted)">'+formatDate(r.l.date)+'</td></tr>';
   });
@@ -775,11 +825,15 @@ function renderHaircutDetail() {
   document.getElementById('mainContent').innerHTML = h;
 }
 
-function renderInterestDetail() {
-  var recs = _financeRecords.filter(function(r){ return r.type==='income' && r.category==='利息收入'; }).slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+function renderInterestDetail(scope) {
+  scope = scope || "post";
+  var pred = scopeDatePredicate(scope);
+  var recs = _financeRecords.filter(function(r){ return r.type==='income' && r.category==='利息收入' && pred(r.date); }).slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
   var total = recs.reduce(function(s,r){ return s+r.amount; },0);
-  var h = '<div class="page-header"><div class="page-title">💰 累计利息收入明细</div><div class="page-sub">"收入登记"里分类为"利息收入"的记录合计（不含本金回收）</div></div>';
+  var h = '<div class="page-header"><div class="page-title">💰 利息收入明细 · '+scopeLabel(scope)+'</div><div class="page-sub">"收入登记"里分类为"利息收入"的记录，按实收日期归属到对应周期（不含本金回收）</div></div>';
+  h += scopeToggleHtml('renderInterestDetail', scope);
   h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>日期</th><th>金额</th><th>关联合同</th><th>客户</th><th>备注</th></tr></thead><tbody>';
+  if(recs.length===0) h += '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">此周期无记录</td></tr>';
   recs.forEach(function(r){
     var loan = r.loanId ? _loans.find(function(l){ return l.id===r.loanId; }) : null;
     h += '<tr><td>'+formatDate(r.date)+'</td><td style="font-weight:600;color:#2e7d32">'+formatMoney(r.amount)+'</td><td>'+(r.loanId||'—')+'</td><td>'+(loan?loan.name:'—')+'</td><td style="color:var(--muted);font-size:12px">'+(r.note||'')+'</td></tr>';
@@ -790,35 +844,93 @@ function renderInterestDetail() {
   document.getElementById('mainContent').innerHTML = h;
 }
 
-function renderProfitDetail() {
-  var totalInterestIncome = _financeRecords.filter(function(r){return r.type==="income" && r.category==="利息收入";}).reduce(function(s,r){return s+r.amount;},0);
-  var totalHaircut = loanRecords().reduce(function(s,l){return s+loanHaircutAmount(l);},0);
-  var otherRecs = _financeRecords.filter(function(r){return r.type==="income" && r.category!=="利息收入" && r.category!=="本金回收";});
-  var totalOtherIncome = otherRecs.reduce(function(s,r){return s+r.amount;},0);
-  var expRecs = _financeRecords.filter(function(r){return r.type==="expense";});
-  var totalExpense = expRecs.reduce(function(s,r){return s+r.amount;},0);
-  var prinRecov = _financeRecords.filter(function(r){return r.type==="income" && r.category==="本金回收";}).reduce(function(s,r){return s+r.amount;},0);
-  var profit = totalHaircut + totalInterestIncome + totalOtherIncome - totalExpense;
+function renderProfitDetail(scope) {
+  scope = scope || "post";
+  var b = computeProfitBreakdown(scopeDatePredicate(scope));
 
   function row(label,amount,color,note,link){
-    return '<tr><td>'+(link?'<a href="javascript:void(0)" onclick="nav(\''+link+'\')" style="color:var(--sky);text-decoration:underline">'+label+'</a>':label)+'</td><td style="text-align:right;font-weight:700;color:'+color+'">'+formatMoney(amount)+'</td><td style="font-size:11px;color:var(--muted)">'+note+'</td></tr>';
+    return '<tr><td>'+(link?'<a href="javascript:void(0)" onclick="'+link+"('"+scope+"')"+'" style="color:var(--sky);text-decoration:underline">'+label+'</a>':label)+'</td><td style="text-align:right;font-weight:700;color:'+color+'">'+formatMoney(amount)+'</td><td style="font-size:11px;color:var(--muted)">'+note+'</td></tr>';
   }
-  var h = '<div class="page-header"><div class="page-title">📈 净利润是怎么算出来的</div><div class="page-sub">净利润 = 砍头息 + 利息收入 + 其他收入 − 运营支出（本金回收不计入）</div></div>';
+  var h = '<div class="page-header"><div class="page-title">📈 净利润是怎么算出来的 · '+scopeLabel(scope)+'</div><div class="page-sub">净利润 = 砍头息 + 利息收入 + 其他收入 − 运营支出（本金回收不计入）</div></div>';
+  h += scopeToggleHtml('renderProfitDetail', scope);
   h += '<div class="card"><table style="width:100%;border-collapse:collapse">';
-  h += row('① 砍头息合计（点击看每笔合同）', totalHaircut, '#e65100', 'Σ(贷款金额×砍头%)，全部合同自动归集', 'haircut_detail');
-  h += row('② 利息收入合计（点击看每笔流水）', totalInterestIncome, '#2e7d32', '"收入登记"里分类=利息收入的记录之和', 'interest_detail');
-  h += row('③ 其他收入合计', totalOtherIncome, '#2e7d32', '手续费/滞纳金/其他收入等分类（不含利息收入、本金回收）', null);
-  h += row('④ 运营支出合计（点击看每笔流水）', -totalExpense, '#c62828', '"支出登记"里的记录之和', 'finance_expense');
-  h += '<tr style="border-top:2px solid #333"><td style="font-weight:700;padding-top:10px">净利润 = ① + ② + ③ − ④</td><td style="text-align:right;font-weight:700;padding-top:10px;color:'+(profit>=0?'#2e7d32':'#c62828')+'">'+formatMoney(profit)+'</td><td></td></tr>';
+  h += row('① 砍头息合计（点击看每笔合同）', b.haircut, '#e65100', '按放款日期归属到本周期', 'renderHaircutDetail');
+  h += row('② 利息收入合计（点击看每笔流水）', b.interestIncome, '#2e7d32', '按实收日期归属到本周期', 'renderInterestDetail');
+  h += row('③ 其他收入合计', b.otherIncome, '#2e7d32', '手续费/滞纳金/其他收入等分类（不含利息收入、本金回收）', null);
+  h += row('④ 运营支出合计', -b.expense, '#c62828', '按发生日期归属到本周期', null);
+  h += '<tr style="border-top:2px solid #333"><td style="font-weight:700;padding-top:10px">净利润 = ① + ② + ③ − ④</td><td style="text-align:right;font-weight:700;padding-top:10px;color:'+(b.netProfit>=0?'#2e7d32':'#c62828')+'">'+formatMoney(b.netProfit)+'</td><td></td></tr>';
   h += '</table></div>';
-  h += '<div class="card"><div style="font-size:12px;color:var(--muted)">⚠️ 本金回收（累计 '+formatMoney(prinRecov)+'）不计入净利润，只是资金回流——客户还的本金本来就是你放出去的钱，收回来不是赚的。</div></div>';
-  if(otherRecs.length>0) {
-    h += '<div class="card"><div class="card-title" style="margin-bottom:10px">③ 其他收入明细</div><div class="table-wrap"><table><thead><tr><th>日期</th><th>分类</th><th>金额</th><th>备注</th></tr></thead><tbody>';
-    otherRecs.forEach(function(r){ h += '<tr><td>'+formatDate(r.date)+'</td><td>'+r.category+'</td><td style="font-weight:600;color:#2e7d32">'+formatMoney(r.amount)+'</td><td style="font-size:12px;color:var(--muted)">'+(r.note||'')+'</td></tr>'; });
-    h += '</tbody></table></div></div>';
-  }
+  h += '<div class="card"><div style="font-size:12px;color:var(--muted)">⚠️ 本金回收（本周期 '+formatMoney(b.prinRecov)+'）不计入净利润，只是资金回流——客户还的本金本来就是你放出去的钱，收回来不是赚的。</div></div>';
+  if(scope==="pre") h += '<div class="card" style="border:1px solid #f57c00"><div style="font-size:12px;color:#f57c00">📦 这部分是9/1之前的历史利润，需要在"历史结算"页确认提取。<button class="btn btn-sm btn-outline" style="margin-left:10px" onclick="nav(\'settlement\')">去结算</button></div></div>';
   h += '<div class="btn-row"><button class="btn btn-outline" onclick="nav(\'home\')">← 返回首页</button></div>';
   document.getElementById('mainContent').innerHTML = h;
+}
+
+// ══ 历史结算存档：与投资方合作分界（SETTLEMENT_CUTOFF = 2026-09-01）══
+// 9/1之前的利润归结算前所有，"确认提取"是一次性动作——点一次，把当时算出来的金额
+// 定格存档，此后系统日常视图（首页/利润表/现金流）永久只看9/1起的数据，不再两栏对比。
+function settlementRow(label,amount,color) {
+  return '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px solid #f5f5f5"><span>'+label+'</span><span style="font-weight:600;color:'+color+'">'+formatMoney(amount)+'</span></div>';
+}
+function renderSettlement() {
+  var live = computeProfitBreakdown(isBeforeCutoff); // 实时重算的9/1前利润（如果之后又补录/改了老数据，可能和已提取的不一样）
+  var settleRecs = _financeRecords.filter(function(r){return r.type==="settlement";}).slice().sort(function(a,b){return (b.date||"").localeCompare(a.date||"");});
+  var extracted = settleRecs.length>0;
+  var extractedTotal = settleRecs.reduce(function(s,r){return s+r.amount;},0);
+  var mismatch = extracted && Math.abs(extractedTotal-live.netProfit)>0.01;
+
+  var h='';
+  h+='<div class="page-header"><div class="page-title">🧾 历史结算存档</div><div class="page-sub">与投资方合作分界日：'+SETTLEMENT_CUTOFF+'　·　此日期前的利润是提取前的，提取后系统日常数字只看'+SETTLEMENT_CUTOFF+'起的，不再两栏对比</div></div>';
+
+  h+='<div class="card" style="border:2px solid '+(extracted?'#2e7d32':'#f57c00')+';max-width:560px">';
+  if(!extracted) {
+    h+='<div class="card-title" style="margin-bottom:10px;color:#f57c00">📦 历史利润（'+SETTLEMENT_CUTOFF+' 之前，待提取）</div>';
+    h+=settlementRow('① 砍头息（按放款日期）', live.haircut, '#e65100');
+    h+=settlementRow('② 利息收入（按实收日期）', live.interestIncome, '#2e7d32');
+    h+=settlementRow('③ 其他收入', live.otherIncome, '#2e7d32');
+    h+=settlementRow('④ 运营支出', -live.expense, '#c62828');
+    h+='<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:6px;border-top:2px solid #333;font-weight:700"><span>历史净利润</span><span style="color:'+(live.netProfit>=0?'#2e7d32':'#c62828')+'">'+formatMoney(live.netProfit)+'</span></div>';
+    h+='<div style="font-size:11px;color:var(--muted);margin-top:8px">本金回收（不算利润，仅供参考）：'+formatMoney(live.prinRecov)+'</div>';
+    h+='<div class="btn-row" style="margin-top:14px"><button class="btn btn-primary" onclick="recordSettlementExtraction()">✅ 确认提取历史利润</button></div>';
+    h+='<div style="font-size:11px;color:var(--muted);margin-top:8px">提取后金额会定格存档，不会因为以后补录/修改9/1前的旧数据而变化；提取后系统日常数字（首页/利润表/现金流）会永久只看'+SETTLEMENT_CUTOFF+'起的数据。</div>';
+  } else {
+    h+='<div class="card-title" style="margin-bottom:10px;color:#2e7d32">✅ 历史利润已提取</div>';
+    h+='<div style="display:flex;justify-content:space-between;padding:10px 0;font-size:22px;font-weight:700;color:#2e7d32"><span>已提取金额</span><span>'+formatMoney(extractedTotal)+'</span></div>';
+    h+='<div style="font-size:12px;color:var(--muted)">提取日期：'+formatDate(settleRecs[0].date)+'　·　这笔钱以后都和本系统无关，不会再滚入任何合作期核算</div>';
+    if(mismatch) {
+      h+='<div style="margin-top:12px;padding:10px;background:#fff3e0;border-radius:8px;font-size:12px;color:#e65100">⚠️ 当前用9/1前数据实时重算的结果是 '+formatMoney(live.netProfit)+'，和已提取的 '+formatMoney(extractedTotal)+' 不一致——说明提取之后又补录或修改了9/1前的旧记录，需要你确认一下这笔差额怎么处理（可以再手动记一笔补充提取，跟我说一声我来加）。</div>';
+    }
+  }
+  h+='<div class="btn-row" style="margin-top:14px"><button class="btn btn-outline" onclick="renderHaircutDetail(\'pre\')">✂️ 查看历史砍头息明细</button> <button class="btn btn-outline" onclick="renderInterestDetail(\'pre\')">💰 查看历史利息明细</button></div>';
+  h+='</div>';
+
+  if(settleRecs.length>0) {
+    h+='<div class="card" style="max-width:720px"><div class="card-title" style="margin-bottom:10px">📋 提取记录</div><div class="table-wrap"><table><thead><tr><th>提取确认日期</th><th>金额</th><th>说明</th></tr></thead><tbody>';
+    settleRecs.forEach(function(r){ h+='<tr><td>'+formatDate(r.date)+'</td><td style="font-weight:700;color:#f57c00">'+formatMoney(r.amount)+'</td><td style="font-size:12px;color:var(--muted)">'+(r.note||'')+'</td></tr>'; });
+    h+='</tbody></table></div></div>';
+  }
+
+  h+='<div class="btn-row"><button class="btn btn-outline" onclick="nav(\'home\')">← 返回首页</button></div>';
+  document.getElementById('mainContent').innerHTML = h;
+}
+
+async function recordSettlementExtraction() {
+  var already = _financeRecords.some(function(r){return r.type==="settlement";});
+  if(already) { alert("历史利润已经提取过了，不能重复提取。如果9/1前的数据后来有改动，请告诉我如何处理差额。"); return; }
+  var pre = computeProfitBreakdown(isBeforeCutoff);
+  if(!confirm("确认提取 "+SETTLEMENT_CUTOFF+" 之前历史利润 "+formatMoney(pre.netProfit)+"？\n\n提取后这笔钱会定格存档，以后都和系统日常核算无关；首页/利润表/现金流会永久只看"+SETTLEMENT_CUTOFF+"起的数据，不可逆，请确认无误。")) return;
+  _financeRecords.unshift({
+    id: "SETTLE"+Date.now(),
+    type: "settlement",
+    amount: pre.netProfit,
+    category: "历史利润提取",
+    date: new Date().toISOString().slice(0,10),
+    loanId: "",
+    note: SETTLEMENT_CUTOFF+"前历史利润确认提取：砍头息"+formatMoney(pre.haircut)+" + 利息收入"+formatMoney(pre.interestIncome)+" + 其他收入"+formatMoney(pre.otherIncome)+" − 支出"+formatMoney(pre.expense)+" = "+formatMoney(pre.netProfit)+"（这笔钱以后都和系统无关）"
+  });
+  await saveFinance();
+  alert("✅ 已提取历史利润 "+formatMoney(pre.netProfit)+"，以后系统日常数字只看"+SETTLEMENT_CUTOFF+"起的数据");
+  renderSettlement();
 }
 
 function renderHome() {
@@ -830,32 +942,36 @@ function renderHome() {
   var closed = _lr.filter(function(l){return l.status==="closed"}).length;
   var totalAmt = _lr.reduce(function(s,l){return s+l.amount},0);
   var activeAmt = _lr.filter(function(l){return l.status!=="closed"}).reduce(function(s,l){return s+l.amount},0);
-  // 利息收入 + 砍头息（从合同自动归集，不含收购车辆）
-  var totalInterestIncome = _financeRecords.filter(function(r){return r.type==="income" && r.category==="利息收入";}).reduce(function(s,r){return s+r.amount;},0);
-  var totalHaircut = _lr.reduce(function(s,l){return s+loanHaircutAmount(l);},0);
-  var totalOtherIncome = _financeRecords.filter(function(r){return r.type==="income" && r.category!=="利息收入" && r.category!=="本金回收";}).reduce(function(s,r){return s+r.amount;},0);
-  // 本金回收不计入利润（只是资金回流）
-  var totalPrinRecov = _financeRecords.filter(function(r){return r.type==="income" && r.category==="本金回收";}).reduce(function(s,r){return s+r.amount;},0);
-  var totalIncome = totalInterestIncome + totalOtherIncome; // 不含本金回收
-  var totalExpense = _financeRecords.filter(function(r){return r.type==="expense";}).reduce(function(s,r){return s+r.amount;},0);
-  var profit = totalHaircut + totalIncome - totalExpense;
+  // ══ 与投资方合作分界（SETTLEMENT_CUTOFF）：首页日常数字全部只看合作期(9/1起)的，
+  // 历史利润是一次性提取动作，只作为一张"状态"卡片，不再摆两栏对比 ══
+  var postSettle = computeProfitBreakdown(isFromCutoff);
+  var totalInterestIncome = postSettle.interestIncome;
+  var totalHaircut = postSettle.haircut;
+  var totalOtherIncome = postSettle.otherIncome;
+  var totalPrinRecov = postSettle.prinRecov; // 本金回收不计入利润，只是资金回流
+  var totalExpense = postSettle.expense;
+  var profit = postSettle.netProfit;
+  var settleRecs = _financeRecords.filter(function(r){return r.type==="settlement";});
+  var historyExtracted = settleRecs.length>0;
+  var historyAmount = historyExtracted ? settleRecs.reduce(function(s,r){return s+r.amount;},0) : computeProfitBreakdown(isBeforeCutoff).netProfit;
   var _aq = acquiredRecords();
   var acqStock = _aq.filter(function(a){return a.status!=="sold";});
   var acqStockCount = acqStock.length;
   var acqStockCost = acqStock.reduce(function(s,a){return s+(a.amount||0);},0);
 
   var h = "";
-  h += '<div class="page-header"><div class="page-title">🏠 系统首页</div><div class="page-sub">汽车抵押贷款业务 · 财务一体化管理平台</div></div>';
+  h += '<div class="page-header"><div class="page-title">🏠 系统首页</div><div class="page-sub">汽车抵押贷款业务 · 财务一体化管理平台 · 以下财务数字默认只统计 '+SETTLEMENT_CUTOFF+' 起（历史利润单独结算，见下方卡片）</div></div>';
 
   h += '<div class="stats-grid">';
   h += '<div class="stat-card blue"><div class="stat-icon">📄</div><div class="stat-label">合同总数</div><div class="stat-value">'+total+'</div><div class="stat-sub">笔贷款</div></div>';
   h += '<div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-label">还款中</div><div class="stat-value">'+active+'</div><div class="stat-sub">笔</div></div>';
   h += '<div class="stat-card amber"><div class="stat-icon">⏳</div><div class="stat-label">审核中</div><div class="stat-value">'+pending+'</div><div class="stat-sub">笔</div></div>';
   h += '<div class="stat-card red"><div class="stat-icon">⚠️</div><div class="stat-label">已逾期</div><div class="stat-value">'+overdue+'</div><div class="stat-sub">笔</div></div>';
-  h += '<div class="stat-card purple" style="cursor:pointer" onclick="nav(\'interest_detail\')"><div class="stat-icon">💰</div><div class="stat-label">累计利息收入</div><div class="stat-value">'+formatMoney(totalInterestIncome)+'</div><div class="stat-sub">不含本金回收 · 点击查看明细</div></div>';
-  h += '<div class="stat-card amber" style="cursor:pointer" onclick="nav(\'haircut_detail\')"><div class="stat-icon">✂️</div><div class="stat-label">累计砍头息</div><div class="stat-value">'+formatMoney(totalHaircut)+'</div><div class="stat-sub">合同自动归集 · 点击查看明细</div></div>';
-  h += '<div class="stat-card blue" style="cursor:pointer" onclick="nav(\'finance_expense\')"><div class="stat-icon">💸</div><div class="stat-label">累计支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div><div class="stat-sub">运营成本 · 点击查看明细</div></div>';
+  h += '<div class="stat-card purple" style="cursor:pointer" onclick="nav(\'interest_detail\')"><div class="stat-icon">💰</div><div class="stat-label">利息收入</div><div class="stat-value">'+formatMoney(totalInterestIncome)+'</div><div class="stat-sub">不含本金回收 · 点击查看明细</div></div>';
+  h += '<div class="stat-card amber" style="cursor:pointer" onclick="nav(\'haircut_detail\')"><div class="stat-icon">✂️</div><div class="stat-label">砍头息</div><div class="stat-value">'+formatMoney(totalHaircut)+'</div><div class="stat-sub">合同自动归集 · 点击查看明细</div></div>';
+  h += '<div class="stat-card blue" style="cursor:pointer" onclick="nav(\'finance_expense\')"><div class="stat-icon">💸</div><div class="stat-label">运营支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div><div class="stat-sub">点击查看明细</div></div>';
   h += '<div class="stat-card green" style="cursor:pointer" onclick="nav(\'profit_detail\')"><div class="stat-icon">📈</div><div class="stat-label">净利润</div><div class="stat-value">'+formatMoney(profit)+'</div><div class="stat-sub">'+(profit>=0?'盈利':'亏损')+' · 点击查看计算过程</div></div>';
+  h += '<div class="stat-card '+(historyExtracted?'blue':'amber')+'" style="cursor:pointer" onclick="nav(\'settlement\')"><div class="stat-icon">'+(historyExtracted?'✅':'📦')+'</div><div class="stat-label">历史利润（'+SETTLEMENT_CUTOFF+' 前）</div><div class="stat-value">'+formatMoney(historyAmount)+'</div><div class="stat-sub">'+(historyExtracted?'已提取，与本系统无关':'待提取 · 点击去结算')+'</div></div>';
   h += '<div class="stat-card amber"><div class="stat-icon">🏦</div><div class="stat-label">在贷余额</div><div class="stat-value">'+formatMoney(activeAmt)+'</div><div class="stat-sub">未结清</div></div>';
   h += '<div class="stat-card purple" style="cursor:pointer" onclick="nav(\'acquired_list\')"><div class="stat-icon">🚙</div><div class="stat-label">收购车辆库存</div><div class="stat-value">'+formatMoney(acqStockCost)+'</div><div class="stat-sub">'+acqStockCount+'台库存中 · 点击查看</div></div>';
   h += "</div>";
@@ -1637,17 +1753,18 @@ function renderFinancePnL() {
 }
 
 function renderCashFlow() {
-  var sorted = _financeRecords.slice().sort(function(a,b){ return a.date.localeCompare(b.date); });
+  var cashRecords = _financeRecords.filter(function(r){return r.type==="income"||r.type==="expense";}); // 排除"提取存档"类型的记录，那不是真实现金收支
+  var sorted = cashRecords.slice().sort(function(a,b){ return a.date.localeCompare(b.date); });
   var running = 0; var flowData = [];
   for(var i=0;i<sorted.length;i++) { var r=sorted[i]; if(r.type==="income") running+=r.amount; else running-=r.amount; flowData.push({date:r.date,type:r.type,amount:r.amount,balance:running,category:r.category}); }
-  var totalIncome = _financeRecords.filter(function(r){return r.type==="income"}).reduce(function(s,r){return s+r.amount},0);
-  var totalExpense = _financeRecords.filter(function(r){return r.type==="expense"}).reduce(function(s,r){return s+r.amount},0);
+  var totalIncome = cashRecords.filter(function(r){return r.type==="income"}).reduce(function(s,r){return s+r.amount},0);
+  var totalExpense = cashRecords.filter(function(r){return r.type==="expense"}).reduce(function(s,r){return s+r.amount},0);
   var balance = totalIncome - totalExpense;
   var h = '<div class="page-header"><div class="page-title">💰 现金流</div><div class="page-sub">资金流水与余额变化</div></div>';
   h += '<div class="stats-grid"><div class="stat-card green"><div class="stat-label">总收入</div><div class="stat-value">'+formatMoney(totalIncome)+'</div></div>';
   h += '<div class="stat-card red"><div class="stat-label">总支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div></div>';
   h += '<div class="stat-card blue"><div class="stat-label">当前余额</div><div class="stat-value">'+formatMoney(balance)+'</div></div>';
-  h += '<div class="stat-card amber"><div class="stat-label">交易笔数</div><div class="stat-value">'+_financeRecords.length+'</div></div></div>';
+  h += '<div class="stat-card amber"><div class="stat-label">交易笔数</div><div class="stat-value">'+cashRecords.length+'</div></div></div>';
   h += '<div class="card"><div class="card-header"><div class="card-title">📋 流水明细</div></div>';
   if(flowData.length===0) { h += '<div style="text-align:center;padding:30px;color:var(--muted)">暂无流水记录</div>'; }
   else {
