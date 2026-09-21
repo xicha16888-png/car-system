@@ -870,7 +870,7 @@ function loanHaircutAmount(l) {
 // "贷款金额/月利率/期数/还款方式/砍头%"这几个最原始的字段现场重新算一遍——
 // 这样"总利息"和"期数"永远是同一套输入、同一个公式算出来的，不会再互相矛盾。
 function loanFreshInterestCalc(l) {
-  return calcRepay(l.amount||0, l.rate||0, l.term||1, l.repay||'先息后本', l.haircut||0);
+  return calcRepay(l.amount||0, l.rate||0, l.term||1, l.repay||'先息后本', l.haircut||0, l.customSchedule);
 }
 // 综合利息 = 砍头息（放款那一刻一次性收的）+ 整个合同期限内按当前条件重新算出来的
 // 利息总额（分期收的）——两个加起来才是这笔单子真正的利息成本。
@@ -938,8 +938,15 @@ function computeProfitBreakdown(datePredicate) {
   return {haircut:haircut, interestIncome:interestIncome, otherIncome:otherIncome, expense:expense, prinRecov:prinRecov, netProfit:netProfit};
 }
 
-// ══ 三种还款方式计算引擎 ══
-function calcRepay(amount, rate, term, repay, haircut) {
+// ══ 还款方式计算引擎（三种标准公式 + 一种完全自定义逐期计划）══
+// customSchedule 只有 repay==="自定义还款" 时才用得上：每期一个对象
+// {principal, interest, dueDate}，由业务员在签合同录入系统时，照着纸质合同上
+// 已经写死的还款计划表（像柬埔寨这边的合同，经常本金/利息/到期日每一期都手写
+// 好了，不是套统一公式）逐期原样抄进来——本金、利息完全自由填，互不联动，因为
+// 每份合同利率、还款节奏都可能不一样，套不进先息后本/等额本息/永续贷任何一种
+// 固定公式。（兼容旧数据：早期版本 customSchedule 存的是"每期一个数字"=本金，
+// 那时利息统一按 amount*rate 现算；这里两种格式都认，不会因为混进旧格式而炸。）
+function calcRepay(amount, rate, term, repay, haircut, customSchedule) {
   // amount: 贷款金额(合同面值), rate: 月利率%, term: 期数, repay: 还款方式, haircut: 砍头比例%
   var r = (rate||0) / 100;
   var hc = (haircut||0) / 100;
@@ -954,6 +961,29 @@ function calcRepay(amount, rate, term, repay, haircut) {
     for(var i=1;i<=term;i++) {
       res.schedule.push({ period:i, principal: i===term ? amount : 0, interest: interest, total: i===term ? amount+interest : interest });
     }
+  } else if(repay === "自定义还款") {
+    var cs = Array.isArray(customSchedule) ? customSchedule : [];
+    var flatInt = Math.round(amount * r * 100) / 100; // 仅用于旧格式(纯数字)兜底
+    var totalInt = 0, totalPrin = 0;
+    for(var i=1;i<=term;i++) {
+      var entry = cs[i-1];
+      var prin, intr, due;
+      if(entry && typeof entry === "object") {
+        prin = Math.round((entry.principal||0)*100)/100;
+        intr = Math.round((entry.interest||0)*100)/100;
+        due = entry.dueDate || "";
+      } else {
+        prin = Math.round((entry||0)*100)/100;
+        intr = flatInt;
+        due = "";
+      }
+      totalInt += intr;
+      totalPrin += prin;
+      res.schedule.push({ period:i, principal: prin, interest: intr, total: Math.round((prin+intr)*100)/100, dueDate: due });
+    }
+    res.monthly = term ? Math.round((totalInt/term)*100)/100 : 0; // 展示用：平均每期利息（逐期本来就可能不一样）
+    res.totalInterest = Math.round(totalInt*100)/100;
+    res.totalRepay = Math.round((totalPrin+totalInt)*100)/100;
   } else if(repay === "永续贷") {
     // 只还利息，本金不动
     var interest = Math.round(amount * r * 100) / 100;
@@ -1397,15 +1427,15 @@ function renderAddForm(data) {
   h += "</div></div>";
   // 贷款设置 + 实时计算
   h += "<div class=\"card\"><div class=\"card-title\" style=\"margin-bottom:12px\">💰 贷款设置</div><div class=\"form-grid\">";
-  h += "<div class=\"form-group\"><label>贷款金额（$）*</label><input type=\"number\" id=\"f_amount\" value=\""+(d.amount||"")+"\" placeholder=\"0\" min=\"0\" oninput=\"calcPreview()\"></div>";
-  h += "<div class=\"form-group\"><label>砍头比例（%）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">实际放款 = 贷款×(1−砍头%)</span></label><input type=\"number\" id=\"f_haircut\" value=\""+(d.haircut!==undefined?d.haircut:"9.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"window._lastEdit='haircut';calcPreview()\"></div>";
-  h += "<div class=\"form-group\"><label>实际放款（$）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">可手动覆盖</span></label><input type=\"number\" id=\"f_actual_amount\" value=\""+(d.actualAmount||"")+"\" placeholder=\"自动计算\" min=\"0\" style=\"border-color:#2e7d32\" oninput=\"window._lastEdit='actual';calcPreview()\"></div>";
-  h += "<div class=\"form-group\"><label>月利率（%）</label><input type=\"number\" id=\"f_rate\" value=\""+(d.rate!==undefined?d.rate:"1.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"window._lastEdit='haircut';calcPreview()\"></div>";
-  h += "<div class=\"form-group\"><label>贷款期限</label><select id=\"f_term\" onchange=\"calcPreview()\">";
+  h += "<div class=\"form-group\"><label>贷款金额（$）*</label><input type=\"number\" id=\"f_amount\" value=\""+(d.amount||"")+"\" placeholder=\"0\" min=\"0\" oninput=\"onScheduleFieldChange()\"></div>";
+  h += "<div class=\"form-group\"><label>砍头比例（%）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">实际放款 = 贷款×(1−砍头%)</span></label><input type=\"number\" id=\"f_haircut\" value=\""+(d.haircut!==undefined?d.haircut:"9.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"window._lastEdit='haircut';onScheduleFieldChange()\"></div>";
+  h += "<div class=\"form-group\"><label>实际放款（$）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">可手动覆盖</span></label><input type=\"number\" id=\"f_actual_amount\" value=\""+(d.actualAmount||"")+"\" placeholder=\"自动计算\" min=\"0\" style=\"border-color:#2e7d32\" oninput=\"window._lastEdit='actual';onScheduleFieldChange()\"></div>";
+  h += "<div class=\"form-group\"><label>月利率（%）</label><input type=\"number\" id=\"f_rate\" value=\""+(d.rate!==undefined?d.rate:"1.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"window._lastEdit='haircut';onScheduleFieldChange()\"></div>";
+  h += "<div class=\"form-group\"><label>贷款期限</label><select id=\"f_term\" onchange=\"onScheduleFieldChange()\">";
   [1,2,3,4,5,6,9,12,18,24,36].forEach(function(v){ h += "<option value=\""+v+"\""+((d.term==v||(v==3&&!d.term))?" selected":"")+">"+v+"期</option>"; });
   h += "</select></div>";
-  h += "<div class=\"form-group\"><label>还款方式</label><select id=\"f_repay\" onchange=\"calcPreview()\">";
-  ["先息后本","等额本息","永续贷"].forEach(function(v){ h += "<option value=\""+v+"\""+((d.repay===v||(v==="先息后本"&&!d.repay))?" selected":"")+">"+v+"</option>"; });
+  h += "<div class=\"form-group\"><label>还款方式</label><select id=\"f_repay\" onchange=\"onScheduleFieldChange()\">";
+  ["先息后本","等额本息","永续贷","自定义还款"].forEach(function(v){ h += "<option value=\""+v+"\""+((d.repay===v||(v==="先息后本"&&!d.repay))?" selected":"")+">"+v+"</option>"; });
   h += "</select></div>";
   h += "<div class=\"form-group\"><label>状态</label><select id=\"f_status\">";
   [{v:"pending",l:"审核中"},{v:"active",l:"还款中"},{v:"overdue",l:"已逾期"},{v:"closed",l:"已结清"}].forEach(function(o){ h += "<option value=\""+o.v+"\""+((d.status===o.v||(o.v==="pending"&&!d.status))?" selected":"")+">"+o.l+"</option>"; });
@@ -1423,12 +1453,143 @@ function renderAddForm(data) {
   document.getElementById("mainContent").innerHTML = h;
   // 绑定手动覆盖检测
   window._lastEdit = d.actualAmount ? "actual" : "haircut";
-  // 编辑已有合同且带有真实还款记录时，先展示真实数据，不要用公式覆盖；
-  // 一旦用户改动金额/利率/期数/方式等字段，会自动切回理论计算器（calcPreview）
-  if(isEdit && d.schedule && d.schedule.length) {
+  window._addFormLoan = data || null; // 供"自定义还款"编辑器读取已保存的逐期本金
+  // 编辑已有合同且带有真实还款记录（且不是自定义还款——自定义那份数据本身就是可编辑
+  // 的原始输入，不是"缓存衍生结果"，要走可编辑的自定义计划编辑器，不能只读展示）时，
+  // 先展示真实数据，不要用公式覆盖；一旦用户改动金额/利率/期数/方式等字段，会自动
+  // 切回对应的计算器（calcPreview 或自定义还款编辑器）
+  if(isEdit && d.repay !== "自定义还款" && d.schedule && d.schedule.length) {
     setTimeout(function(){ renderActualSchedule(d); }, 50);
   } else {
-    setTimeout(calcPreview, 50);
+    setTimeout(onScheduleFieldChange, 50);
+  }
+}
+
+// ══ 表单里任何会影响还款计划的字段变了，就按当前选的还款方式分流到对应计算器 ══
+function onScheduleFieldChange() {
+  var repay = document.getElementById("f_repay")?.value;
+  if(repay === "自定义还款") renderCustomScheduleUI(window._addFormLoan);
+  else calcPreview();
+}
+
+// ══ "自定义还款"计划编辑器：逐期到期日/本金/利息全部手填，互不联动 ══
+// 场景：柬埔寨这边纸质合同签的时候，往往已经把每一期的到期日、应还本金、应还
+// 利息都写死在合同表格里了（不是套统一公式现算出来的），业务员录系统就是照抄
+// 这张表——所以这里三样都给独立输入框，不自动联动，业务员填的是合同上写的数字，
+// 不是系统帮他算的数字。"按月利率批量填利息"按钮只是图个方便：多数合同利息确实
+// 是本金×月利率算出来的（每期固定，不按剩余本金），点一下全填上，剩下哪期不一样
+// 再手动改，不点也完全可以自己一格格填。
+function renderCustomScheduleUI(d) {
+  var box = document.getElementById("calcPreviewBox"); if(!box) return;
+  var amount = parseFloat(document.getElementById("f_amount")?.value)||0;
+  var rate   = parseFloat(document.getElementById("f_rate")?.value)||0;
+  var term   = parseInt(document.getElementById("f_term")?.value)||1;
+  var loanDate = document.getElementById("f_date")?.value || new Date().toISOString().slice(0,10);
+  var actEl = document.getElementById("f_actual_amount");
+  var hcEl  = document.getElementById("f_haircut");
+  var haircut, actual;
+  if(window._lastEdit === "actual" && actEl && actEl.value !== "" && amount > 0) {
+    actual  = parseFloat(actEl.value) || 0;
+    haircut = actual > 0 ? Math.round((1 - actual/amount)*10000)/100 : 0;
+    if(hcEl) hcEl.value = haircut.toFixed(2);
+  } else {
+    haircut = parseFloat(hcEl?.value) || 0;
+    actual  = Math.round(amount * (1 - haircut/100) * 100) / 100;
+    if(actEl && amount > 0) actEl.value = actual || "";
+  }
+  if(!amount) { box.style.display="none"; return; }
+  // 每期数据：优先用当前输入框里已经填了的值（改期数时不清空已填的），输入框还
+  // 不存在时（刚切到"自定义还款"或刚打开编辑页）用合同已保存的 d.customSchedule
+  // 兜底（新旧两种格式都认：对象{principal,interest,dueDate} 或早期的纯数字本金），
+  // 都没有就默认到期日按放款日逐月往后推、金额留空
+  var rows = [];
+  for(var i=1;i<=term;i++) {
+    var pEl = document.getElementById('cs_p_'+i), iEl = document.getElementById('cs_i_'+i), dEl = document.getElementById('cs_d_'+i);
+    if(pEl || iEl || dEl) {
+      rows.push({ principal: pEl?(parseFloat(pEl.value)||0):0, interest: iEl?(parseFloat(iEl.value)||0):0, dueDate: dEl?(dEl.value||""):"" });
+    } else {
+      var saved = d && d.customSchedule ? d.customSchedule[i-1] : null;
+      if(saved && typeof saved === "object") {
+        rows.push({ principal: saved.principal||0, interest: saved.interest||0, dueDate: saved.dueDate||defaultDueDate(loanDate,i) });
+      } else if(saved != null) {
+        rows.push({ principal: saved, interest: 0, dueDate: defaultDueDate(loanDate,i) }); // 旧格式，利息留给业务员自己填/用批量按钮
+      } else {
+        rows.push({ principal: 0, interest: 0, dueDate: defaultDueDate(loanDate,i) });
+      }
+    }
+  }
+  var sumPrincipal = Math.round(rows.reduce(function(s,v){return s+v.principal;},0)*100)/100;
+  var sumInterest  = Math.round(rows.reduce(function(s,v){return s+v.interest;},0)*100)/100;
+  var diff = Math.round((amount - sumPrincipal)*100)/100;
+
+  var rowsHtml = "";
+  for(var i=1;i<=term;i++) {
+    var rw = rows[i-1];
+    rowsHtml += "<tr><td>第"+i+"期</td>"+
+      "<td><input type=\"date\" id=\"cs_d_"+i+"\" value=\""+rw.dueDate+"\" style=\"padding:4px 6px;border:1px solid #cfd8dc;border-radius:4px;font-family:inherit\" oninput=\"updateCustomScheduleTotals()\"></td>"+
+      "<td><input type=\"number\" id=\"cs_p_"+i+"\" value=\""+(rw.principal||"")+"\" min=\"0\" step=\"0.01\" placeholder=\"0\" style=\"width:100px;padding:4px 6px;border:1px solid #cfd8dc;border-radius:4px;font-family:inherit\" oninput=\"updateCustomScheduleTotals()\"></td>"+
+      "<td><input type=\"number\" id=\"cs_i_"+i+"\" value=\""+(rw.interest||"")+"\" min=\"0\" step=\"0.01\" placeholder=\"0\" style=\"width:100px;padding:4px 6px;border:1px solid #cfd8dc;border-radius:4px;font-family:inherit\" oninput=\"updateCustomScheduleTotals()\"></td>"+
+      "<td id=\"cs_total_"+i+"\" style=\"font-weight:600\">$"+(rw.principal+rw.interest).toFixed(2)+"</td></tr>";
+  }
+  box.style.display = "block";
+  box.innerHTML =
+    "<div style=\"font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px\">📊 自定义还款计划——按纸质合同逐期填到期日/本金/利息，跟系统公式无关，填多少算多少</div>"+
+    "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px\">"+
+    "<div style=\"background:#e3f2fd;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">实际放款</div><div style=\"font-size:18px;font-weight:700;color:#1565c0\">$"+actual.toFixed(2)+"</div></div>"+
+    "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">利息合计</div><div id=\"cs_intTile\" style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+sumInterest.toFixed(2)+"</div></div>"+
+    "<div id=\"cs_sumTile\" style=\"background:"+(diff===0?"#e8f5e9":"#ffebee")+";border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">本金合计（应=贷款金额）</div><div class=\"cs-sum-val\" style=\"font-size:15px;font-weight:700;color:"+(diff===0?"#2e7d32":"#c62828")+"\">$"+sumPrincipal.toFixed(2)+(diff!==0?"（差$"+diff.toFixed(2)+"）":"（已配平）")+"</div></div>"+
+    "</div>"+
+    "<div class=\"btn-row\" style=\"margin-bottom:8px\"><button type=\"button\" class=\"btn btn-sm btn-outline\" onclick=\"quickFillCustomInterest()\">⚡ 按月利率（"+rate+"%）批量填利息</button><button type=\"button\" class=\"btn btn-sm btn-outline\" onclick=\"quickFillCustomDates()\">📅 按放款日逐月重填到期日</button></div>"+
+    "<div style=\"overflow-x:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><thead><tr style=\"background:#f5f5f5\"><th style=\"padding:6px 8px;text-align:left\">期数</th><th style=\"padding:6px 8px;text-align:left\">到期日</th><th style=\"padding:6px 8px;text-align:left\">应还本金</th><th style=\"padding:6px 8px;text-align:left\">应还利息</th><th style=\"padding:6px 8px;text-align:left\">合计</th></tr></thead><tbody>"+
+    rowsHtml + "</tbody></table></div>"+
+    "<div style=\"font-size:11px;color:var(--muted);margin-top:8px\">💡 本金/利息合计不需要非要对平才能保存——客户还没还完、或者是分批补录的，都可以先保存，之后回到这里继续补填，或者在「回款登记」里逐期登记实际收款。</div>";
+}
+// 到期日默认值：放款日起，按第N期往后推N个月（只是给业务员一个起点，改成合同上写的真实日期即可）
+function defaultDueDate(loanDate, period) {
+  var dt = new Date(loanDate);
+  if(isNaN(dt.getTime())) dt = new Date();
+  dt.setMonth(dt.getMonth() + period);
+  return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0");
+}
+function quickFillCustomInterest() {
+  var amount = parseFloat(document.getElementById("f_amount")?.value)||0;
+  var rate   = parseFloat(document.getElementById("f_rate")?.value)||0;
+  var term   = parseInt(document.getElementById("f_term")?.value)||1;
+  var flat = Math.round(amount*rate/100*100)/100;
+  for(var i=1;i<=term;i++) { var el = document.getElementById('cs_i_'+i); if(el) el.value = flat; }
+  updateCustomScheduleTotals();
+}
+function quickFillCustomDates() {
+  var term = parseInt(document.getElementById("f_term")?.value)||1;
+  var loanDate = document.getElementById("f_date")?.value || new Date().toISOString().slice(0,10);
+  for(var i=1;i<=term;i++) { var el = document.getElementById('cs_d_'+i); if(el) el.value = defaultDueDate(loanDate, i); }
+}
+// 逐期输入框敲字时只更新数字，不重建整个表格（避免每敲一个字光标就跳走）
+function updateCustomScheduleTotals() {
+  var amount = parseFloat(document.getElementById("f_amount")?.value)||0;
+  var term   = parseInt(document.getElementById("f_term")?.value)||1;
+  var sumP = 0, sumI = 0;
+  for(var i=1;i<=term;i++) {
+    var pEl = document.getElementById('cs_p_'+i), iEl = document.getElementById('cs_i_'+i);
+    var p = pEl ? (parseFloat(pEl.value)||0) : 0;
+    var it = iEl ? (parseFloat(iEl.value)||0) : 0;
+    sumP += p; sumI += it;
+    var totCell = document.getElementById('cs_total_'+i);
+    if(totCell) totCell.textContent = "$"+(p+it).toFixed(2);
+  }
+  sumP = Math.round(sumP*100)/100;
+  sumI = Math.round(sumI*100)/100;
+  var diff = Math.round((amount - sumP)*100)/100;
+  var intTile = document.getElementById('cs_intTile');
+  if(intTile) intTile.textContent = "$"+sumI.toFixed(2);
+  var sumTile = document.getElementById('cs_sumTile');
+  if(sumTile) {
+    sumTile.style.background = diff===0 ? "#e8f5e9" : "#ffebee";
+    var valEl = sumTile.querySelector('.cs-sum-val');
+    if(valEl) {
+      valEl.style.color = diff===0 ? "#2e7d32" : "#c62828";
+      valEl.textContent = "$"+sumP.toFixed(2)+(diff!==0?"（差$"+diff.toFixed(2)+"）":"（已配平）");
+    }
   }
 }
 
@@ -1477,7 +1638,22 @@ async function saveLoan() {
   var repay = document.getElementById("f_repay")?.value||"先息后本";
   var rate = parseFloat(document.getElementById("f_rate")?.value)||0;
   var term = parseInt(document.getElementById("f_term")?.value)||3;
-  var res = calcRepay(amount, rate, term, repay, haircut);
+  // "自定义还款"：把逐期到期日/本金/利息输入框里的值原样存下来（customSchedule，
+  // 每期一个{principal,interest,dueDate}对象）——这就是业务员照合同抄进来的原始
+  // 数据，不是套公式算出来的，总利息/展示全部走 calcRepay 现算，不额外缓存
+  var customSchedule = null;
+  if(repay === "自定义还款") {
+    customSchedule = [];
+    for(var ci=1;ci<=term;ci++) {
+      var cpEl = document.getElementById('cs_p_'+ci), ciEl = document.getElementById('cs_i_'+ci), cdEl = document.getElementById('cs_d_'+ci);
+      customSchedule.push({
+        principal: cpEl ? (parseFloat(cpEl.value)||0) : 0,
+        interest: ciEl ? (parseFloat(ciEl.value)||0) : 0,
+        dueDate: cdEl ? (cdEl.value||"") : ""
+      });
+    }
+  }
+  var res = calcRepay(amount, rate, term, repay, haircut, customSchedule);
   var actualAmountEl = document.getElementById("f_actual_amount");
   var actualAmount = parseFloat(actualAmountEl?.value)||res.actual;
   var data = {
@@ -1493,6 +1669,7 @@ async function saveLoan() {
     rate:rate,
     term:term,
     repay:repay,
+    customSchedule:customSchedule || [],
     monthly:res.monthly,
     totalRepay:res.totalRepay,
     totalInterest:res.totalInterest,
@@ -1534,7 +1711,7 @@ function renderList() {
   h+='<input type="text" id="searchInput" placeholder="搜索客户/合同号/车牌/手机..." oninput="filterList()" style="flex:2">';
   h+='<select id="monthFilter" onchange="filterList()"><option value="">全部月份</option>'+getMonthOptions()+'</select>';
   h+='<select id="statusFilter" onchange="filterList();updateStatCards()"><option value="">全部状态</option><option value="active">还款中</option><option value="overdue">已逾期</option><option value="pending">审核中</option><option value="closed">已结清</option></select>';
-  h+='<select id="repayFilter" onchange="filterList()"><option value="">全部方式</option><option value="先息后本">先息后本</option><option value="等额本息">等额本息</option><option value="永续贷">永续贷</option></select>';
+  h+='<select id="repayFilter" onchange="filterList()"><option value="">全部方式</option><option value="先息后本">先息后本</option><option value="等额本息">等额本息</option><option value="永续贷">永续贷</option><option value="自定义还款">自定义还款</option></select>';
   h+='<button class="btn btn-success" onclick="nav(\'add\')">➕ 新增</button>';
   h+='</div>';
   h+='<div id="listResult"></div>';
@@ -1958,10 +2135,15 @@ function onRepayLoanSelect() {
   var nextP = nextUnrecordedPeriod(id);
   var recorded = loanRecordedPeriods(id);
   var maxP = Math.max(loan.term||1, nextP+2);
+  var calc = loanFreshInterestCalc(loan);
+  var today = new Date().toISOString().slice(0,10);
   var opts='';
   for(var i=1;i<=maxP;i++) {
     var already = recorded.indexOf(i) >= 0;
-    opts += '<option value="'+i+'"'+(i===nextP?' selected':'')+'>第'+i+'期'+(already?'（已登记）':'')+'</option>';
+    var due = calc.schedule[i-1] ? (calc.schedule[i-1].dueDate||'') : '';
+    var overdue = due && due < today && !already;
+    var label = '第'+i+'期'+(due?'（应还'+due+'）':'')+(already?' ✅已登记':(overdue?' ⚠️已逾期':''));
+    opts += '<option value="'+i+'"'+(i===nextP?' selected':'')+'>'+label+'</option>';
   }
   sel.innerHTML = opts;
   document.getElementById('rc_settle').checked = false;
