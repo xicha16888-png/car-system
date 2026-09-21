@@ -27,15 +27,17 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // 三个角色：boss(老板，全权) / sales(业务员，只管贷款+收购车辆业务，
 // 不碰财务) / finance(财务，能看全部数据，只能新增收支登记，不能改/删
 // 任何东西，也不能碰贷款合同)。
-// 账号密码是明文写在下面这几行方便你以后自己改，服务器启动时就用
-// scrypt（Node自带，不用装额外的包）加盐哈希，之后内存里只留哈希，
-// 不会再有明文到处跑。要改密码/加账号，直接改 USERS_RAW 这个数组。
+// 账号现在存在数据库里（car_users），老板可以在"账号管理"页面自己增删改，
+// 不用再改代码重新部署。下面这个 USERS_RAW 只是"初始种子账号"——
+// 第一次启动、数据库里还没有 car_users 这个key时，会用它来建立最初的
+// 三个账号；之后账号管理全部走数据库，改这个数组不会再生效。
 // ══════════════════════════════════════════════════════════
 const USERS_RAW = [
   { usernames: ['gui', 'boss'], password: 'gui',    role: 'boss',    displayName: '老板' },
   { usernames: ['caiwu'],       password: 'gui888', role: 'finance', displayName: '财务' },
   { usernames: ['yewu'],        password: 'yewu888', role: 'sales',   displayName: '业务员' },
 ];
+const VALID_ROLES = ['boss', 'finance', 'sales'];
 
 function hashPassword(password, salt) {
   salt = salt || crypto.randomBytes(16).toString('hex');
@@ -51,12 +53,55 @@ function verifyPassword(password, stored) {
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
 }
+function genUserId() {
+  return 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
 
-const USERS = new Map(); // username -> {stored, role, displayName}
-USERS_RAW.forEach(u => {
-  const stored = hashPassword(u.password);
-  u.usernames.forEach(name => USERS.set(name, { stored, role: u.role, displayName: u.displayName }));
-});
+// USER_RECORDS：数据库里 car_users 这一整个数组的内存副本（含密码哈希，
+// 从不下发给前端）。USERS：username -> record 的查找表，每次 USER_RECORDS
+// 变化后调用 rebuildUserIndex() 重建。
+let USER_RECORDS = [];
+let USERS = new Map();
+function rebuildUserIndex() {
+  USERS = new Map();
+  USER_RECORDS.forEach(rec => { (rec.usernames || []).forEach(name => USERS.set(name, rec)); });
+}
+async function persistUsers() {
+  const { error } = await supabase.from('pawndata').upsert([{ key: 'car_users', value: USER_RECORDS }], { onConflict: 'key' });
+  if (error) throw new Error('DB_WRITE_ERROR: ' + error.message);
+}
+async function initUsers() {
+  try {
+    const { data, error } = await supabase.from('pawndata').select('value').eq('key', 'car_users').maybeSingle();
+    if (!error && data && Array.isArray(data.value) && data.value.length > 0) {
+      USER_RECORDS = data.value;
+      console.log(`  账号：已从数据库加载 ${USER_RECORDS.length} 个账号`);
+    } else {
+      USER_RECORDS = USERS_RAW.map(u => ({
+        id: genUserId(), usernames: u.usernames.slice(), displayName: u.displayName,
+        role: u.role, status: 'active', passwordHash: hashPassword(u.password), createdAt: new Date().toISOString()
+      }));
+      await persistUsers();
+      console.log('  账号：数据库中未找到账号数据，已写入初始种子账号（gui/boss, caiwu, yewu）');
+    }
+  } catch (e) {
+    console.error('  账号：初始化失败，使用内存种子账号兜底：', e.message);
+    USER_RECORDS = USERS_RAW.map(u => ({
+      id: genUserId(), usernames: u.usernames.slice(), displayName: u.displayName,
+      role: u.role, status: 'active', passwordHash: hashPassword(u.password), createdAt: new Date().toISOString()
+    }));
+  }
+  rebuildUserIndex();
+}
+function sanitizeUser(rec) {
+  return { id: rec.id, username: rec.usernames[0], usernames: rec.usernames, displayName: rec.displayName, role: rec.role, status: rec.status, createdAt: rec.createdAt };
+}
+function activeBossCount() {
+  return USER_RECORDS.filter(r => r.role === 'boss' && r.status === 'active').length;
+}
+function invalidateSessionsFor(usernames) {
+  sessions.forEach((sess, token) => { if (usernames.indexOf(sess.username) !== -1) sessions.delete(token); });
+}
 
 const sessions = new Map(); // token -> {username, role, displayName, ts}
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12小时不操作就要求重新登录
@@ -77,8 +122,11 @@ function auth(req, res, next) {
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body || {};
   const rec = USERS.get(String(username || '').trim());
-  if (!rec || !verifyPassword(String(password || ''), rec.stored)) {
+  if (!rec || !verifyPassword(String(password || ''), rec.passwordHash)) {
     return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: '用户名或密码错误' });
+  }
+  if (rec.status !== 'active') {
+    return res.status(401).json({ error: 'ACCOUNT_DISABLED', message: '此账号已被禁用，请联系管理员' });
   }
   const token = crypto.randomBytes(24).toString('hex');
   sessions.set(token, { username: String(username).trim(), role: rec.role, displayName: rec.displayName, ts: Date.now() });
@@ -94,6 +142,102 @@ app.post('/api/logout', auth, (req, res) => {
 
 app.get('/api/me', auth, (req, res) => {
   res.json({ ok: true, username: req.user.username, role: req.user.role, displayName: req.user.displayName });
+});
+
+// ══ 账号管理（老板专属：自己新增/改角色/重置密码/启用禁用/删除员工账号）══
+function requireBoss(req, res) {
+  if (req.user.role !== 'boss') { res.status(403).json({ error: 'PERMISSION_DENIED', message: '只有老板能管理账号' }); return false; }
+  return true;
+}
+app.get('/api/users', auth, (req, res) => {
+  if (!requireBoss(req, res)) return;
+  res.json({ ok: true, users: USER_RECORDS.map(sanitizeUser) });
+});
+app.post('/api/users', auth, async (req, res) => {
+  if (!requireBoss(req, res)) return;
+  try {
+    const username = String((req.body || {}).username || '').trim();
+    const displayName = String((req.body || {}).displayName || '').trim() || username;
+    const role = String((req.body || {}).role || '').trim();
+    const password = String((req.body || {}).password || '');
+    if (!username) return res.status(400).json({ error: 'BAD_INPUT', message: '请输入用户名' });
+    if (VALID_ROLES.indexOf(role) === -1) return res.status(400).json({ error: 'BAD_INPUT', message: '角色不合法' });
+    if (password.length < 4) return res.status(400).json({ error: 'BAD_INPUT', message: '密码至少需要4位' });
+    const lower = username.toLowerCase();
+    const dup = USER_RECORDS.some(r => (r.usernames || []).some(n => n.toLowerCase() === lower));
+    if (dup) return res.status(400).json({ error: 'DUP_USERNAME', message: '这个用户名已经被使用了' });
+    const rec = { id: genUserId(), usernames: [username], displayName, role, status: 'active', passwordHash: hashPassword(password), createdAt: new Date().toISOString() };
+    USER_RECORDS.push(rec);
+    await persistUsers();
+    rebuildUserIndex();
+    res.json({ ok: true, user: sanitizeUser(rec) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/users/:id/reset-password', auth, async (req, res) => {
+  if (!requireBoss(req, res)) return;
+  try {
+    const rec = USER_RECORDS.find(r => r.id === req.params.id);
+    if (!rec) return res.status(404).json({ error: 'NOT_FOUND', message: '账号不存在' });
+    const password = String((req.body || {}).password || '');
+    if (password.length < 4) return res.status(400).json({ error: 'BAD_INPUT', message: '密码至少需要4位' });
+    rec.passwordHash = hashPassword(password);
+    await persistUsers();
+    rebuildUserIndex();
+    invalidateSessionsFor(rec.usernames);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/users/:id/update', auth, async (req, res) => {
+  if (!requireBoss(req, res)) return;
+  try {
+    const rec = USER_RECORDS.find(r => r.id === req.params.id);
+    if (!rec) return res.status(404).json({ error: 'NOT_FOUND', message: '账号不存在' });
+    const body = req.body || {};
+    const isSelf = (rec.usernames || []).indexOf(req.user.username) !== -1;
+    if (body.role !== undefined) {
+      const role = String(body.role).trim();
+      if (VALID_ROLES.indexOf(role) === -1) return res.status(400).json({ error: 'BAD_INPUT', message: '角色不合法' });
+      if (isSelf && role !== 'boss') return res.status(400).json({ error: 'SELF_LOCK', message: '不能把自己正在登录的老板账号改成别的角色，请用另一个老板账号操作' });
+      if (rec.role === 'boss' && role !== 'boss' && rec.status === 'active' && activeBossCount() <= 1) {
+        return res.status(400).json({ error: 'LAST_BOSS', message: '系统至少要保留一个启用中的老板账号' });
+      }
+      rec.role = role;
+    }
+    if (body.status !== undefined) {
+      const status = String(body.status).trim();
+      if (['active', 'disabled'].indexOf(status) === -1) return res.status(400).json({ error: 'BAD_INPUT', message: '状态不合法' });
+      if (isSelf && status === 'disabled') return res.status(400).json({ error: 'SELF_LOCK', message: '不能禁用自己正在登录的账号' });
+      if (rec.role === 'boss' && status === 'disabled' && activeBossCount() <= 1) {
+        return res.status(400).json({ error: 'LAST_BOSS', message: '系统至少要保留一个启用中的老板账号' });
+      }
+      rec.status = status;
+    }
+    if (body.displayName !== undefined) {
+      const dn = String(body.displayName).trim();
+      if (dn) rec.displayName = dn;
+    }
+    await persistUsers();
+    rebuildUserIndex();
+    if (body.role !== undefined || body.status !== undefined) invalidateSessionsFor(rec.usernames);
+    res.json({ ok: true, user: sanitizeUser(rec) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/users/:id', auth, async (req, res) => {
+  if (!requireBoss(req, res)) return;
+  try {
+    const rec = USER_RECORDS.find(r => r.id === req.params.id);
+    if (!rec) return res.status(404).json({ error: 'NOT_FOUND', message: '账号不存在' });
+    const isSelf = (rec.usernames || []).indexOf(req.user.username) !== -1;
+    if (isSelf) return res.status(400).json({ error: 'SELF_LOCK', message: '不能删除自己正在登录的账号' });
+    if (rec.role === 'boss' && rec.status === 'active' && activeBossCount() <= 1) {
+      return res.status(400).json({ error: 'LAST_BOSS', message: '系统至少要保留一个启用中的老板账号' });
+    }
+    USER_RECORDS = USER_RECORDS.filter(r => r.id !== rec.id);
+    await persistUsers();
+    rebuildUserIndex();
+    invalidateSessionsFor(rec.usernames);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ══ 每个角色对 car_loans / car_finance 两个数组的权限 ══
@@ -233,10 +377,12 @@ app.get('/api/backup', auth, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`\n${'═'.repeat(50)}`);
-  console.log(`  🚗 MORODOK 汽车抵押贷款管理系统`);
-  console.log(`${'═'.repeat(50)}`);
-  console.log(`  访问地址: http://localhost:${PORT}`);
-  console.log(`${'═'.repeat(50)}\n`);
+initUsers().finally(() => {
+  app.listen(PORT, () => {
+    console.log(`\n${'═'.repeat(50)}`);
+    console.log(`  🚗 MORODOK 汽车抵押贷款管理系统`);
+    console.log(`${'═'.repeat(50)}`);
+    console.log(`  访问地址: http://localhost:${PORT}`);
+    console.log(`${'═'.repeat(50)}\n`);
+  });
 });
