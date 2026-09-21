@@ -857,12 +857,25 @@ function loanHaircutAmount(l) {
   if(l.actualAmount!=null && l.amount>0) return l.amount - l.actualAmount;
   return l.amount*(l.haircut||0)/100;
 }
-// ══ 综合利息 = 砍头息 + 整个合同期限内的利息总额 ══
-// 这笔合同真正的利息收益：砍头息是放款那一刻就赚到的，月息/永续息是分期收的，
-// 两个加起来才是这笔单子实际的利息成本。totalInterest 是合同保存时按还款方式
-// （先息后本/等额本息/永续贷）算出来的整期利息总额，新增/编辑合同、批量导入时都会存。
+// ══ 综合利息 / 实际月利率 —— 2026-09 重新设计过一次，记一下当时改了什么、为什么改 ══
+//
+// 老版本的问题（复盘）：综合利息直接拿"贷款金额-实际放款(砍头)"加上合同里存的
+// l.totalInterest 这个缓存字段。但 l.totalInterest 是"合同当时保存那一刻"算出来
+// 存进去的，如果后来这笔合同的期数(term)被改过、或者数据是很早以前直接改库/导入
+// 进来的，就会出现"现在存的期数"和"当初算 totalInterest 用的期数"对不上号的情况——
+// 比如实测发现有一笔永续贷，库里 term=10，但 totalInterest 却是按 term=1 算出来的，
+// 两个字段互相打架，算出来的"实际月利率"自然就是错的、乱的，单子之间没法比。
+//
+// 新版本：不再相信缓存的 totalInterest，每次都用 calcRepay() 拿合同当前存的
+// "贷款金额/月利率/期数/还款方式/砍头%"这几个最原始的字段现场重新算一遍——
+// 这样"总利息"和"期数"永远是同一套输入、同一个公式算出来的，不会再互相矛盾。
+function loanFreshInterestCalc(l) {
+  return calcRepay(l.amount||0, l.rate||0, l.term||1, l.repay||'先息后本', l.haircut||0);
+}
+// 综合利息 = 砍头息（放款那一刻一次性收的）+ 整个合同期限内按当前条件重新算出来的
+// 利息总额（分期收的）——两个加起来才是这笔单子真正的利息成本。
 function loanComprehensiveInterest(l) {
-  return loanHaircutAmount(l) + (l.totalInterest||0);
+  return loanHaircutAmount(l) + loanFreshInterestCalc(l).totalInterest;
 }
 // 综合利息占实际放款的比例，方便横向比较不同单子的真实收益率
 function loanComprehensiveInterestPct(l) {
@@ -870,10 +883,15 @@ function loanComprehensiveInterestPct(l) {
   if(!base) return 0;
   return Math.round(loanComprehensiveInterest(l)/base*10000)/100;
 }
-// ══ 实际月利息率 = 综合利息占实际放款的比例，平摊到每个月 ══
+// ══ 实际月利息率 = 综合利息占实际放款的比例，平摊到合同期数里 ══
 // 砍头息是放款那一刻一次性收的，但它本质上也是这笔钱的利息成本，只是提前收了；
 // 把"砍头息+整期利息"这笔综合利息，平摊到合同的每一期（每个月），才是这笔单子
 // 真正的月利息率——比单看"月利率%"这个字段（只算了分期利息，没算砍头）更准。
+// 注：这里用的是合同存的期数(term)做分摊。对"先息后本/等额本息"这种有真实约定
+// 期限的合同，这个数字是准的；"永续贷"本质上没有固定到期日（可以一直续下去），
+// 期数只是当初录入时选的一个参考值，所以永续贷这一栏更适合当作"按目前这个期数
+// 假设来算的参考月利率"，不是铁板钉钉的到期收益率——这是这类产品本身的性质，
+// 不是算法的锅。
 function loanEffectiveMonthlyRate(l) {
   var term = l.term || 1;
   return Math.round(loanComprehensiveInterestPct(l)/term*100)/100;
@@ -1415,8 +1433,12 @@ function renderAddForm(data) {
 // 避免误把calcRepay()现算的等额本息公式当成真实还款金额
 function renderActualSchedule(d) {
   var box = document.getElementById("calcPreviewBox"); if(!box) return;
+  // 还款计划表这里也改成跟"综合利息/实际月利率"用同一套现算的 calcRepay 结果，
+  // 不再单独读 d.schedule 这个缓存数组——避免出现"上面统计数字"和"下面明细表"
+  // 对不上号的情况（之前就是因为一个用缓存、一个没用，才会互相矛盾）。
+  var fresh = loanFreshInterestCalc(d);
   var rows = "";
-  var sch = d.schedule || [];
+  var sch = fresh.schedule || [];
   for(var i=0;i<sch.length;i++) {
     var s = sch[i];
     rows += "<tr><td>第"+s.period+"期</td><td>$"+Number(s.principal||0).toFixed(2)+"</td><td>$"+Number(s.interest||0).toFixed(2)+"</td><td style=\"font-weight:600\">$"+Number(s.total||0).toFixed(2)+"</td></tr>";
@@ -1427,11 +1449,11 @@ function renderActualSchedule(d) {
   var effMonthlyRate = loanEffectiveMonthlyRate(d);
   box.style.display = "block";
   box.innerHTML =
-    "<div style=\"font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px\">📋 实际还款记录（合同已保存数据，非公式计算）</div>" +
-    "<div style=\"font-size:11px;color:var(--muted);margin-bottom:10px\">以下为该合同保存的真实数据。若修改上方金额/利率/期数/还款方式等字段，将自动切换为理论等额本息计算器（仅供参考，不代表实际还款）。</div>" +
+    "<div style=\"font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px\">📋 还款计划（按合同当前保存的额度/利率/期数/方式现算）</div>" +
+    "<div style=\"font-size:11px;color:var(--muted);margin-bottom:10px\">以下按该合同当前保存的金额/利率/期数/还款方式/砍头%重新计算，保证跟上面的统计数字对得上。若在上方修改这些字段，会实时重新计算。</div>" +
     "<div style=\"display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px\">" +
     "<div style=\"background:#e3f2fd;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">实际放款</div><div style=\"font-size:18px;font-weight:700;color:#1565c0\">$"+Number(d.actualAmount||0).toFixed(2)+"</div></div>" +
-    "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">总利息（不含砍头）</div><div style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+Number(d.totalInterest||0).toFixed(2)+"</div></div>" +
+    "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">总利息（不含砍头）</div><div style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+fresh.totalInterest.toFixed(2)+"</div></div>" +
     "<div style=\"background:#f3e5f5;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">砍头息</div><div style=\"font-size:18px;font-weight:700;color:#8e24aa\">$"+haircutAmt.toFixed(2)+"</div></div>" +
     "<div style=\"background:#ffebee;border-radius:8px;padding:10px;text-align:center;border:1.5px solid #ef9a9a\"><div style=\"font-size:11px;color:#546e7a\">🧮 实际月利率（砍头+总利息平摊到每月）</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">"+effMonthlyRate+"%</div><div style=\"font-size:10px;color:#546e7a\">综合利息 $"+comprehensive.toFixed(2)+"（占实放"+comprehensivePct+"%）</div></div>" +
     "</div>" +
