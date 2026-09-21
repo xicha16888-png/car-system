@@ -260,7 +260,7 @@ function authHeaders() { return AUTH_TOKEN ? {"Authorization":"Bearer "+AUTH_TOK
 function canWriteLoans() { return CURRENT_ROLE==="boss" || CURRENT_ROLE==="sales"; }
 function canDelete() { return CURRENT_ROLE==="boss"; }
 function canViewFinance() { return CURRENT_ROLE==="boss" || CURRENT_ROLE==="finance"; }
-function canAddFinance() { return CURRENT_ROLE==="boss" || CURRENT_ROLE==="finance"; }
+function canAddFinance() { return CURRENT_ROLE==="boss"; } // 财务只读：连新增收支登记都不行，记账只能老板（或业务员卖收购车那笔特例）做
 function canEditFinance() { return CURRENT_ROLE==="boss"; }
 function isBoss() { return CURRENT_ROLE==="boss"; }
 
@@ -1006,10 +1006,8 @@ function buildSidebar() {
     items.push({id:"finance_pnl", icon:"📊", label:"利润表"});
     items.push({id:"settlement", icon:"🧾", label:"历史结算"});
     items.push({id:"finance_cashflow", icon:"💰", label:"现金流"});
-    if(canAddFinance()) {
-      items.push({id:"finance_income", icon:"💵", label:"收入登记"});
-      items.push({id:"finance_expense", icon:"💸", label:"支出登记"});
-    }
+    items.push({id:"finance_income", icon:"💵", label:canAddFinance()?"收入登记":"收入记录（只读）"});
+    items.push({id:"finance_expense", icon:"💸", label:canAddFinance()?"支出登记":"支出记录（只读）"});
   }
   items.push({sec:"风控提醒"});
   items.push({id:"overdue", icon:"⚠️", label:"逾期催收"});
@@ -1037,7 +1035,7 @@ var PAGE_REQUIRES = {
   backup:"boss", restore:"boss", user_manage:"boss",
   finance_pnl:"viewFinance", settlement:"viewFinance", finance_cashflow:"viewFinance",
   haircut_detail:"viewFinance", interest_detail:"viewFinance", profit_detail:"viewFinance",
-  finance_income:"addFinance", finance_expense:"addFinance"
+  finance_income:"viewFinance", finance_expense:"viewFinance"
 };
 function pageAllowed(page) {
   var req = PAGE_REQUIRES[page];
@@ -1830,10 +1828,16 @@ function onLoanSelect() {
 
 function renderFinanceForm(type) {
   var isIncome = type==='income';
-  var title = isIncome ? '💵 收入登记' : '💸 支出登记';
-  var sub = isIncome ? '记录贷款收款、利息收入等' : '记录运营开支、办公费用等';
+  var canAdd = canAddFinance();
+  var title = isIncome ? (canAdd?'💵 收入登记':'💵 收入记录') : (canAdd?'💸 支出登记':'💸 支出记录');
+  var sub = canAdd ? (isIncome ? '记录贷款收款、利息收入等' : '记录运营开支、办公费用等') : '财务账号为只读，只能查看记录，不能新增/修改/删除';
   var h='';
   h+='<div class="page-header"><div class="page-title">'+title+'</div><div class="page-sub">'+sub+'</div></div>';
+
+  if(!canAdd) {
+    h+='<div class="card" style="background:#fafafa;border:1px dashed #cfd8dc;text-align:center;padding:20px;color:var(--muted)">🔒 你的账号（'+(CURRENT_DISPLAY||CURRENT_ROLE)+'）只能查看'+(isIncome?'收入':'支出')+'记录，新增/编辑/删除只有老板能操作</div>';
+  } else {
+
   h+='<div class="card">';
 
   // 收入登记：先选合同
@@ -1873,6 +1877,8 @@ function renderFinanceForm(type) {
   h+='<button class="btn btn-outline" onclick="nav(\'finance_pnl\')">📊 查看利润表</button>';
   h+='</div></div>';
 
+  }
+
   // 最近记录
   h+='<div class="card"><div class="card-header"><div class="card-title">📋 最近'+(isIncome?'收入':'支出')+'记录</div></div>';
   var records=_financeRecords.filter(function(r){return r.type===type;}).slice(0,15);
@@ -1895,6 +1901,7 @@ function renderFinanceForm(type) {
 }
 
 async function saveFinanceRecord(type) {
+  if(!canAddFinance()) { alert("⛔ 你的账号没有新增收支记录的权限"); return; }
   var amount = parseFloat(document.getElementById("fi_amount")?.value);
   if(!amount || amount<=0) { alert("请输入有效的金额"); return; }
   var rec = {
