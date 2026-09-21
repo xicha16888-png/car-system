@@ -260,7 +260,7 @@ function authHeaders() { return AUTH_TOKEN ? {"Authorization":"Bearer "+AUTH_TOK
 function canWriteLoans() { return CURRENT_ROLE==="boss" || CURRENT_ROLE==="sales"; }
 function canDelete() { return CURRENT_ROLE==="boss"; }
 function canViewFinance() { return CURRENT_ROLE==="boss" || CURRENT_ROLE==="finance"; }
-function canAddFinance() { return CURRENT_ROLE==="boss" || CURRENT_ROLE==="finance"; }
+function canAddFinance() { return CURRENT_ROLE==="boss"; } // 财务只读：连新增收支登记都不行，记账只能老板（或业务员卖收购车那笔特例）做
 function canEditFinance() { return CURRENT_ROLE==="boss"; }
 function isBoss() { return CURRENT_ROLE==="boss"; }
 
@@ -733,12 +733,26 @@ async function doImportConfirm() {
     var dup=_loans.some(function(e){return e.name===row.name&&e.plate===row.plate;});
     if(dup){log('⏭ 跳过: '+row.name+' '+row.plate,'#ffd93d');skip++;continue;}
     var id=genId();
+    // ══ 还款方式/期数用解析时已经判断好的 row.repay/row.term（先息后本/等额本息/永续贷），
+    // 不再一律当永续贷处理，这样"综合利息"等统计才准 ══
+    var impTerm = row.term || 6;
+    var impRepay = row.repay || '永续贷';
+    var impTotalRepay, impTotalInterest;
+    if(impRepay === '等额本息') {
+      // 等额本息：月供=本金+利息，总利息＝总还款－本金
+      impTotalRepay = Math.round(row.monthly*impTerm*100)/100;
+      impTotalInterest = Math.round((impTotalRepay-row.amount)*100)/100;
+    } else {
+      // 先息后本 / 永续贷：每期只还利息（最后一期额外还本），月供本身就是纯利息
+      impTotalInterest = Math.round(row.monthly*impTerm*100)/100;
+      impTotalRepay = Math.round((row.amount+impTotalInterest)*100)/100;
+    }
     var loan={id:id,name:row.name,phone:row.phone,idcard:'',brand:row.brand,model:'',color:row.color,
       plate:row.plate,estimate:row.appraise,amount:row.amount,actualAmount:row.actual,
-      haircut:row.haircut,rate:row.rate,monthly:row.monthly,term:6,repay:'永续贷',status:'active',
+      haircut:row.haircut,rate:row.rate,monthly:row.monthly,term:impTerm,repay:impRepay,status:'active',
       date:row.date||new Date().toISOString().slice(0,10),
       note:(row.paydate?'还款日:'+row.paydate+' ':'')+row.note,
-      totalRepay:row.amount+row.monthly*6,totalInterest:row.monthly*6,schedule:[]};
+      totalRepay:impTotalRepay,totalInterest:impTotalInterest,schedule:[]};
     _loans.push(loan);
     try{
       await saveLoans();
@@ -842,6 +856,19 @@ function formatMoney(n) { return "¥"+Number(n).toLocaleString(); }
 function loanHaircutAmount(l) {
   if(l.actualAmount!=null && l.amount>0) return l.amount - l.actualAmount;
   return l.amount*(l.haircut||0)/100;
+}
+// ══ 综合利息 = 砍头息 + 整个合同期限内的利息总额 ══
+// 这笔合同真正的利息收益：砍头息是放款那一刻就赚到的，月息/永续息是分期收的，
+// 两个加起来才是这笔单子实际的利息成本。totalInterest 是合同保存时按还款方式
+// （先息后本/等额本息/永续贷）算出来的整期利息总额，新增/编辑合同、批量导入时都会存。
+function loanComprehensiveInterest(l) {
+  return loanHaircutAmount(l) + (l.totalInterest||0);
+}
+// 综合利息占实际放款的比例，方便横向比较不同单子的真实收益率
+function loanComprehensiveInterestPct(l) {
+  var base = l.actualAmount!=null ? l.actualAmount : (l.amount||0);
+  if(!base) return 0;
+  return Math.round(loanComprehensiveInterest(l)/base*10000)/100;
 }
 
 // ══ 收购车辆（公司收购持有，等待转卖的车） vs 抵押车辆（放贷抵押车）══
@@ -979,10 +1006,8 @@ function buildSidebar() {
     items.push({id:"finance_pnl", icon:"📊", label:"利润表"});
     items.push({id:"settlement", icon:"🧾", label:"历史结算"});
     items.push({id:"finance_cashflow", icon:"💰", label:"现金流"});
-    if(canAddFinance()) {
-      items.push({id:"finance_income", icon:"💵", label:"收入登记"});
-      items.push({id:"finance_expense", icon:"💸", label:"支出登记"});
-    }
+    items.push({id:"finance_income", icon:"💵", label:canAddFinance()?"收入登记":"收入记录（只读）"});
+    items.push({id:"finance_expense", icon:"💸", label:canAddFinance()?"支出登记":"支出记录（只读）"});
   }
   items.push({sec:"风控提醒"});
   items.push({id:"overdue", icon:"⚠️", label:"逾期催收"});
@@ -1010,7 +1035,7 @@ var PAGE_REQUIRES = {
   backup:"boss", restore:"boss", user_manage:"boss",
   finance_pnl:"viewFinance", settlement:"viewFinance", finance_cashflow:"viewFinance",
   haircut_detail:"viewFinance", interest_detail:"viewFinance", profit_detail:"viewFinance",
-  finance_income:"addFinance", finance_expense:"addFinance"
+  finance_income:"viewFinance", finance_expense:"viewFinance"
 };
 function pageAllowed(page) {
   var req = PAGE_REQUIRES[page];
@@ -1304,13 +1329,18 @@ function calcPreview() {
     var s = res.schedule[i];
     scheduleRows += "<tr><td>第"+s.period+"期</td><td>$"+s.principal.toFixed(2)+"</td><td>$"+s.interest.toFixed(2)+"</td><td style=\"font-weight:600\">$"+s.total.toFixed(2)+"</td></tr>";
   }
+  var haircutAmt = Math.round((amount-res.actual)*100)/100;
+  var comprehensive = Math.round((haircutAmt+res.totalInterest)*100)/100;
+  var comprehensivePct = res.actual ? Math.round(comprehensive/res.actual*10000)/100 : 0;
   box.style.display="block";
   box.innerHTML =
-    "<div style=\"display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px\">" +
+    "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px\">" +
     "<div style=\"background:#e3f2fd;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">实际放款</div><div style=\"font-size:18px;font-weight:700;color:#1565c0\">$"+res.actual.toFixed(2)+"</div></div>" +
     "<div style=\"background:#e8f5e9;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">"+modeLabel+"</div><div style=\"font-size:18px;font-weight:700;color:#2e7d32\">$"+res.monthly.toFixed(2)+"</div></div>" +
-    "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">总利息</div><div style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+res.totalInterest.toFixed(2)+"</div></div>" +
+    "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">总利息（不含砍头）</div><div style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+res.totalInterest.toFixed(2)+"</div></div>" +
     "<div style=\"background:#fce4ec;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">应总还款</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">$"+res.totalRepay.toFixed(2)+"</div></div>" +
+    "<div style=\"background:#f3e5f5;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">砍头息</div><div style=\"font-size:18px;font-weight:700;color:#8e24aa\">$"+haircutAmt.toFixed(2)+"</div></div>" +
+    "<div style=\"background:#ffebee;border-radius:8px;padding:10px;text-align:center;border:1.5px solid #ef9a9a\"><div style=\"font-size:11px;color:#546e7a\">🧮 综合利息（砍头+总利息）</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">$"+comprehensive.toFixed(2)+"</div><div style=\"font-size:10px;color:#546e7a\">占实际放款 "+comprehensivePct+"%</div></div>" +
     "</div>" +
     "<div style=\"overflow-x:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><thead><tr style=\"background:#f5f5f5\"><th style=\"padding:6px 8px;text-align:left\">期数</th><th style=\"padding:6px 8px;text-align:left\">本金</th><th style=\"padding:6px 8px;text-align:left\">利息</th><th style=\"padding:6px 8px;text-align:left\">合计</th></tr></thead><tbody>" +
     scheduleRows + "</tbody></table></div>";
@@ -1382,13 +1412,18 @@ function renderActualSchedule(d) {
     var s = sch[i];
     rows += "<tr><td>第"+s.period+"期</td><td>$"+Number(s.principal||0).toFixed(2)+"</td><td>$"+Number(s.interest||0).toFixed(2)+"</td><td style=\"font-weight:600\">$"+Number(s.total||0).toFixed(2)+"</td></tr>";
   }
+  var haircutAmt = loanHaircutAmount(d);
+  var comprehensive = loanComprehensiveInterest(d);
+  var comprehensivePct = loanComprehensiveInterestPct(d);
   box.style.display = "block";
   box.innerHTML =
     "<div style=\"font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px\">📋 实际还款记录（合同已保存数据，非公式计算）</div>" +
     "<div style=\"font-size:11px;color:var(--muted);margin-bottom:10px\">以下为该合同保存的真实数据。若修改上方金额/利率/期数/还款方式等字段，将自动切换为理论等额本息计算器（仅供参考，不代表实际还款）。</div>" +
     "<div style=\"display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px\">" +
     "<div style=\"background:#e3f2fd;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">实际放款</div><div style=\"font-size:18px;font-weight:700;color:#1565c0\">$"+Number(d.actualAmount||0).toFixed(2)+"</div></div>" +
-    "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">总利息</div><div style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+Number(d.totalInterest||0).toFixed(2)+"</div></div>" +
+    "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">总利息（不含砍头）</div><div style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+Number(d.totalInterest||0).toFixed(2)+"</div></div>" +
+    "<div style=\"background:#f3e5f5;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">砍头息</div><div style=\"font-size:18px;font-weight:700;color:#8e24aa\">$"+haircutAmt.toFixed(2)+"</div></div>" +
+    "<div style=\"background:#ffebee;border-radius:8px;padding:10px;text-align:center;border:1.5px solid #ef9a9a\"><div style=\"font-size:11px;color:#546e7a\">🧮 综合利息（砍头+总利息）</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">$"+comprehensive.toFixed(2)+"</div><div style=\"font-size:10px;color:#546e7a\">占实际放款 "+comprehensivePct+"%</div></div>" +
     "</div>" +
     "<div style=\"overflow-x:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><thead><tr style=\"background:#f5f5f5\"><th style=\"padding:6px 8px;text-align:left\">期数</th><th style=\"padding:6px 8px;text-align:left\">本金</th><th style=\"padding:6px 8px;text-align:left\">利息</th><th style=\"padding:6px 8px;text-align:left\">合计</th></tr></thead><tbody>" +
     rows + "</tbody></table></div>";
@@ -1545,6 +1580,7 @@ function filterList() {
         h+='<div class="loan-card-row"><span class="loan-card-lbl">💰 贷款金额</span><span class="loan-card-val" style="color:var(--sky)">'+formatMoney(l.amount)+'</span></div>';
         h+='<div class="loan-card-row"><span class="loan-card-lbl">💵 月利息</span><span class="loan-card-val">$'+(l.monthly||0).toFixed(2)+' · '+(l.repay||'等额本息')+'</span></div>';
         h+='<div class="loan-card-row"><span class="loan-card-lbl">📋 砍头%</span><span class="loan-card-val">'+(l.haircut||0)+'% · 实放$'+(l.actualAmount||0).toLocaleString()+'</span></div>';
+        h+='<div class="loan-card-row"><span class="loan-card-lbl">🧮 综合利息</span><span class="loan-card-val" style="color:#c62828;font-weight:700">$'+loanComprehensiveInterest(l).toFixed(2)+' · 占实放'+loanComprehensiveInterestPct(l)+'%</span></div>';
         h+='<div class="loan-card-btns">'+(canWriteLoans()?'<button class="btn btn-primary" onclick="editLoan(\''+l.id+'\')">✏️ 编辑</button>':'')+(canDelete()?'<button class="btn btn-danger" onclick="deleteLoan(\''+l.id+'\')">🗑 删除</button>':'')+'</div>';
         h+='</div>';
       });
@@ -1565,7 +1601,7 @@ function filterList() {
       h+='<span style="font-weight:700;font-size:13px"><span id="ma_'+mk+'">'+(isCollapsed?'▶':'▼')+'</span> 📅 '+mk+'</span>';
       h+='<span style="font-size:12px;opacity:.8">'+gloans.length+'笔 · 贷款$'+gamt.toLocaleString()+' · 月息$'+gmon.toFixed(0)+'</span></div>';
       h+='<div id="mg_'+mk+'" style="display:'+(isCollapsed?'none':'')+';margin-bottom:10px"><div class="card" style="padding:0;overflow:hidden;border-radius:0 0 8px 8px"><div class="table-wrap"><table><thead><tr>';
-      h+='<th>#</th><th>客户姓名</th><th>手机号</th><th>车牌 / 品牌</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>月利率%</th><th>月利息</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th>';
+      h+='<th>#</th><th>客户姓名</th><th>手机号</th><th>车牌 / 品牌</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>月利率%</th><th>月利息</th><th>综合利息</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th>';
       h+='</tr></thead><tbody>';
       gloans.forEach(function(l){
         var sc=l.status==='overdue'?'#ffebee':l.status==='closed'?'#fafafa':l.status==='pending'?'#fff8e1':'';
@@ -1579,6 +1615,7 @@ function filterList() {
         h+='<td style="color:#f57c00">'+(l.haircut||0)+'%</td>';
         h+='<td style="color:#c62828">'+(l.rate||0)+'%</td>';
         h+='<td style="font-weight:600;color:#2e7d32">$'+(l.monthly||0).toFixed(2)+'</td>';
+        h+='<td style="font-weight:700;color:#c62828;white-space:nowrap">$'+loanComprehensiveInterest(l).toFixed(2)+'<div style="font-size:10px;color:var(--muted);font-weight:400">占实放'+loanComprehensiveInterestPct(l)+'%</div></td>';
         h+='<td><span style="font-size:11px;background:#e3f2fd;color:#1565c0;padding:2px 7px;border-radius:10px;white-space:nowrap">'+(l.repay||'等额本息')+'</span></td>';
         h+='<td>'+statusHtml(l.status)+'</td>';
         h+='<td style="font-size:11px;color:var(--muted);white-space:nowrap">'+formatDate(l.date)+'</td>';
@@ -1791,10 +1828,16 @@ function onLoanSelect() {
 
 function renderFinanceForm(type) {
   var isIncome = type==='income';
-  var title = isIncome ? '💵 收入登记' : '💸 支出登记';
-  var sub = isIncome ? '记录贷款收款、利息收入等' : '记录运营开支、办公费用等';
+  var canAdd = canAddFinance();
+  var title = isIncome ? (canAdd?'💵 收入登记':'💵 收入记录') : (canAdd?'💸 支出登记':'💸 支出记录');
+  var sub = canAdd ? (isIncome ? '记录贷款收款、利息收入等' : '记录运营开支、办公费用等') : '财务账号为只读，只能查看记录，不能新增/修改/删除';
   var h='';
   h+='<div class="page-header"><div class="page-title">'+title+'</div><div class="page-sub">'+sub+'</div></div>';
+
+  if(!canAdd) {
+    h+='<div class="card" style="background:#fafafa;border:1px dashed #cfd8dc;text-align:center;padding:20px;color:var(--muted)">🔒 你的账号（'+(CURRENT_DISPLAY||CURRENT_ROLE)+'）只能查看'+(isIncome?'收入':'支出')+'记录，新增/编辑/删除只有老板能操作</div>';
+  } else {
+
   h+='<div class="card">';
 
   // 收入登记：先选合同
@@ -1834,6 +1877,8 @@ function renderFinanceForm(type) {
   h+='<button class="btn btn-outline" onclick="nav(\'finance_pnl\')">📊 查看利润表</button>';
   h+='</div></div>';
 
+  }
+
   // 最近记录
   h+='<div class="card"><div class="card-header"><div class="card-title">📋 最近'+(isIncome?'收入':'支出')+'记录</div></div>';
   var records=_financeRecords.filter(function(r){return r.type===type;}).slice(0,15);
@@ -1856,6 +1901,7 @@ function renderFinanceForm(type) {
 }
 
 async function saveFinanceRecord(type) {
+  if(!canAddFinance()) { alert("⛔ 你的账号没有新增收支记录的权限"); return; }
   var amount = parseFloat(document.getElementById("fi_amount")?.value);
   if(!amount || amount<=0) { alert("请输入有效的金额"); return; }
   var rec = {
