@@ -1,2166 +1,388 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>MORODOK · 汽车抵押贷款管理系统</title>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-:root{--navy:#0f2d5c;--blue:#1565c0;--sky:#1e88e5;--light:#e3f2fd;--green:#2e7d32;--red:#c62828;--amber:#f57c00;--purple:#6a1b9a;--gray:#546e7a;--bg:#f0f4f8;--white:#fff;--border:#cfd8dc;--text:#1a2a3a;--muted:#78909c}
-html,body{height:100%;overflow:hidden}
-body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text)}
-.header{background:linear-gradient(135deg,#0a1f42,var(--navy) 40%,var(--blue) 80%,var(--sky));color:#fff;padding:0 20px;height:54px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 16px rgba(0,0,0,.35);position:fixed;top:0;left:0;right:0;z-index:200}
-.header-title{font-size:18px;font-weight:700;display:flex;align-items:center;gap:10px}
-.header-right{display:flex;align-items:center;gap:12px;font-size:12px}
-.chip{background:rgba(255,255,255,.15);padding:4px 12px;border-radius:20px;font-size:11px;border:1px solid rgba(255,255,255,.2)}
-.layout{display:flex;height:calc(100vh - 54px);margin-top:54px}
-.sidebar{width:215px;background:linear-gradient(180deg,#0a1f42,var(--navy));color:#fff;display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0}
-.sidebar::-webkit-scrollbar{width:3px}
-.sidebar::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15)}
-.sb-logo{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
-.sb-logo-sub{font-size:10px;color:rgba(255,255,255,.35);letter-spacing:2px}
-.sb-logo-name{font-size:15px;font-weight:700}
-.sb-label{font-size:9px;color:rgba(255,255,255,.3);padding:10px 16px 3px;letter-spacing:2px}
-.nav-item{display:flex;align-items:center;gap:9px;padding:9px 16px;cursor:pointer;font-size:12.5px;transition:all .18s;border-left:3px solid transparent;color:rgba(255,255,255,.65)}
-.nav-item:hover{background:rgba(255,255,255,.07);color:#fff;border-left-color:rgba(30,136,229,.5)}
-.nav-item.active{background:rgba(30,136,229,.25);border-left-color:#64b5f6;color:#fff;font-weight:500}
-.nav-icon{font-size:14px;width:16px;text-align:center}
-.nav-divider{height:1px;background:rgba(255,255,255,.07);margin:4px 12px}
-.nav-badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700}
-.main{flex:1;overflow-y:auto;padding:20px 22px}
-.main::-webkit-scrollbar{width:5px}
-.main::-webkit-scrollbar-thumb{background:#cfd8dc;border-radius:4px}
-.page-header{margin-bottom:18px}
-.page-title{font-size:20px;font-weight:700;color:var(--navy);display:flex;align-items:center;gap:8px;margin-bottom:3px}
-.page-sub{font-size:12px;color:var(--muted)}
-.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
-.stat-card{background:#fff;border-radius:10px;padding:16px 18px;box-shadow:0 1px 4px rgba(0,0,0,.07);position:relative;overflow:hidden;transition:transform .2s}
-.stat-card:hover{transform:translateY(-2px)}
-.stat-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;border-radius:10px 10px 0 0}
-.stat-card.blue::before{background:linear-gradient(90deg,var(--sky),#42a5f5)}
-.stat-card.green::before{background:linear-gradient(90deg,var(--green),#43a047)}
-.stat-card.amber::before{background:linear-gradient(90deg,var(--amber),#ffa726)}
-.stat-card.red::before{background:linear-gradient(90deg,var(--red),#ef5350)}
-.stat-card.purple::before{background:linear-gradient(90deg,var(--purple),#ab47bc)}
-.stat-icon{position:absolute;right:14px;top:14px;font-size:28px;opacity:.12}
-.stat-label{font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:500}
-.stat-value{font-size:26px;font-weight:700;line-height:1}
-.stat-card.blue .stat-value{color:var(--sky)}.stat-card.green .stat-value{color:var(--green)}
-.stat-card.amber .stat-value{color:var(--amber)}.stat-card.red .stat-value{color:var(--red)}
-.stat-card.purple .stat-value{color:var(--purple)}
-.stat-sub{font-size:11px;color:var(--muted);margin-top:6px}
-.card{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.07);padding:18px 20px;margin-bottom:14px}
-.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
-.card-title{font-size:14px;font-weight:600;color:var(--navy)}
-.table-wrap{overflow-x:auto;border-radius:6px;border:1px solid var(--border)}
-table{width:100%;border-collapse:collapse;font-size:12.5px}
-th{background:var(--navy);color:#fff;padding:9px 12px;text-align:left;font-weight:500;white-space:nowrap;font-size:12px}
-td{padding:9px 12px;border-bottom:1px solid #eef2f7;color:var(--text);vertical-align:middle}
-tr:last-child td{border-bottom:none}
-tr:hover td{background:#f8faff}
-.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:500}
-.badge-green{background:#e8f5e9;color:#2e7d32}.badge-red{background:#ffebee;color:#c62828}
-.badge-amber{background:#fff3e0;color:#e65100}.badge-blue{background:#e3f2fd;color:#1565c0}
-.badge-gray{background:#eceff1;color:#546e7a}
-.form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.form-group{display:flex;flex-direction:column;gap:5px}
-.form-group label{font-size:11px;color:var(--gray);font-weight:600}
-.form-group input,.form-group select,.form-group textarea{border:1.5px solid var(--border);border-radius:7px;padding:9px 11px;font-size:13px;font-family:inherit;background:#fff;color:var(--text);transition:all .2s;outline:none}
-.form-group input:focus,.form-group select:focus{border-color:var(--sky);box-shadow:0 0 0 3px rgba(30,136,229,.1)}
-.form-group.span2{grid-column:span 2}.form-group.span3{grid-column:span 3}
-.btn{padding:9px 18px;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;border:none;transition:all .2s;font-family:inherit;display:inline-flex;align-items:center;gap:6px}
-.btn-primary{background:var(--sky);color:#fff;box-shadow:0 2px 8px rgba(30,136,229,.3)}
-.btn-primary:hover{background:var(--blue);transform:translateY(-1px)}
-.btn-success{background:var(--green);color:#fff}
-.btn-success:hover{background:#1b5e20}
-.btn-danger{background:var(--red);color:#fff;padding:5px 11px;font-size:11px;border-radius:5px}
-.btn-sm{padding:5px 12px;font-size:12px}
-.btn-outline{background:transparent;border:1.5px solid var(--border);color:var(--gray)}
-.btn-outline:hover{border-color:var(--sky);color:var(--sky);background:#f0f7ff}
-.btn-row{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
-.alert{padding:11px 15px;border-radius:8px;font-size:13px;margin-bottom:12px;border-left:3px solid}
-.alert-red{background:#ffebee;color:#b71c1c;border-color:var(--red)}
-.alert-amber{background:#fff8e1;color:#e65100;border-color:var(--amber)}
-.alert-green{background:#e8f5e9;color:#2e7d32;border-color:var(--green)}
-.alert-blue{background:#e3f2fd;color:#1565c0;border-color:var(--sky)}
-.modal-bg{display:none;position:fixed;inset:0;background:rgba(10,31,66,.6);z-index:500;align-items:center;justify-content:center}
-.modal-bg.open{display:flex}
-.modal{background:#fff;border-radius:14px;padding:26px;min-width:550px;max-width:90vw;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
-.modal-title{font-size:16px;font-weight:700;color:var(--navy);margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
-.modal-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)}
-.home-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:16px}
-.home-card{background:#fff;border-radius:12px;padding:26px 14px;text-align:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.08);transition:all .25s;border:2px solid transparent}
-.home-card:hover{transform:translateY(-5px);box-shadow:0 10px 28px rgba(30,136,229,.2);border-color:var(--sky)}
-.home-card .icon{font-size:36px;margin-bottom:10px}
-.home-card .label{font-size:13px;font-weight:600;color:var(--navy)}
-.home-card .sublabel{font-size:11px;color:var(--muted);margin-top:3px}
-.search-row{display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap}
-.search-row input,.search-row select{border:1.5px solid var(--border);border-radius:7px;padding:8px 12px;font-size:13px;outline:none;font-family:inherit;background:#fff}
-.search-row input:focus,.search-row select:focus{border-color:var(--sky)}
-.search-row input{flex:1;min-width:180px}
-.reminder-item{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-radius:8px;margin-bottom:8px;font-size:13px;gap:12px}
-.reminder-item.overdue{background:#fff5f5;border-left:3px solid var(--red)}
-.reminder-item.warn{background:#fffbf0;border-left:3px solid var(--amber)}
-.reminder-item.info{background:#f0f7ff;border-left:3px solid var(--sky)}
-.loading-overlay{display:none;position:fixed;inset:0;background:rgba(10,31,66,.7);z-index:999;align-items:center;justify-content:center;flex-direction:column;gap:16px}
-.loading-overlay.show{display:flex}
-.loading-spinner{width:48px;height:48px;border:4px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.loading-text{color:#fff;font-size:15px}
-.mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;height:58px;background:linear-gradient(0deg,#0a1f42,#0f2d5c);z-index:300;flex-direction:row;align-items:stretch;border-top:1px solid rgba(255,255,255,.12)}
-.mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;color:rgba(255,255,255,.5);font-size:10px;transition:color .15s;padding:4px 2px;-webkit-tap-highlight-color:transparent}
-.mob-nav-item.active{color:#64b5f6}
-.mob-nav-item .mi{font-size:22px;line-height:1}
-.mob-more-panel{display:none;position:fixed;bottom:58px;left:0;right:0;background:#fff;z-index:299;border-top:1px solid #e0e0e0;box-shadow:0 -6px 24px rgba(0,0,0,.12);border-radius:18px 18px 0 0;padding:6px 0 14px}
-.mob-more-panel.open{display:block}
-.mob-more-item{display:flex;align-items:center;gap:14px;padding:14px 24px;font-size:14px;cursor:pointer;color:var(--text);-webkit-tap-highlight-color:transparent}
-.mob-more-item:active{background:#f5f5f5}
-.mob-more-item .mmi{font-size:22px;width:30px;text-align:center}
-.mob-divider{height:1px;background:#f0f0f0;margin:4px 16px}
-.loan-card{background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 2px 8px rgba(0,0,0,.07);border-left:4px solid var(--sky);margin-bottom:10px}
-.loan-card.overdue{border-left-color:var(--red)}
-.loan-card.closed{border-left-color:#9e9e9e}
-.loan-card.pending{border-left-color:var(--amber)}
-.loan-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
-.loan-card-name{font-size:16px;font-weight:700;color:var(--navy)}
-.loan-card-meta{font-size:11px;color:var(--muted);margin-top:2px}
-.loan-card-row{display:flex;justify-content:space-between;padding:4px 0;font-size:13px;border-bottom:1px solid #f5f5f5}
-.loan-card-row:last-of-type{border:none}
-.loan-card-lbl{color:var(--muted)}
-.loan-card-val{font-weight:600}
-.loan-card-btns{display:flex;gap:8px;margin-top:12px}
-.loan-card-btns .btn{flex:1;padding:9px;font-size:13px;text-align:center}
-.settle-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
-.login-screen{position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0a1f42,#123a7a 45%,#1565c0 100%);padding:20px}
-.login-card{background:#fff;border-radius:20px;padding:40px 36px 32px;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.35);text-align:center}
-.login-logo{width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#0a1f42,#1565c0);display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto 14px}
-.login-title{font-size:22px;font-weight:900;color:var(--navy);letter-spacing:1px}
-.login-sub{font-size:12px;color:var(--muted);margin-top:4px;margin-bottom:26px}
-.login-field{text-align:left;margin-bottom:14px}
-.login-field label{display:block;font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px}
-.login-field input{width:100%;padding:12px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit;background:#f8fafc}
-.login-field input:focus{outline:none;border-color:var(--sky);background:#fff}
-.login-btn{width:100%;padding:13px;border:none;border-radius:10px;background:linear-gradient(135deg,#0a1f42,var(--blue));color:#fff;font-size:15px;font-weight:700;cursor:pointer;margin-top:8px}
-.login-btn:hover{opacity:.92}
-.login-btn:disabled{opacity:.6;cursor:not-allowed}
-.login-error{color:var(--red);font-size:12px;margin-top:10px;min-height:16px}
-.login-foot{font-size:11px;color:var(--muted);margin-top:18px}
-@media(max-width:768px){
-html,body{overflow:auto;height:auto}
-.sidebar{display:none}
-.mob-nav{display:flex}
-.layout{flex-direction:column;height:auto;margin-top:48px;margin-bottom:60px}
-.main{padding:10px;overflow-y:visible}
-.header{padding:0 12px;height:48px}
-.header-title{font-size:13px;gap:6px}
-.header-right .chip{display:none}
-.stats-grid{grid-template-columns:repeat(2,1fr);gap:8px}
-.stat-card{padding:10px 12px}
-.stat-value{font-size:20px}
-.home-grid{grid-template-columns:repeat(3,1fr);gap:8px}
-.home-card{padding:14px 4px}
-.home-card .icon{font-size:26px;margin-bottom:6px}
-.home-card .label{font-size:11px}
-.home-card .sublabel{display:none}
-.form-grid{grid-template-columns:1fr}
-.form-group.span2,.form-group.span3{grid-column:span 1}
-.search-row{flex-direction:column;gap:8px}
-.search-row input,.search-row select{width:100%}
-.modal{min-width:unset;width:96vw;padding:16px;max-height:88vh;overflow-y:auto}
-.card{padding:12px}
-.card-header{flex-direction:column;align-items:flex-start;gap:8px}
-.btn-row{flex-wrap:wrap;gap:8px}
-.btn-row .btn{flex:1;min-width:110px;padding:10px 8px}
-.page-header{margin-bottom:12px}
-.page-title{font-size:15px}
-.settle-grid{grid-template-columns:1fr;gap:10px}
+const express = require('express');
+const crypto = require('crypto');
+const { createClient } = require('@supabase/supabase-js');
+const path = require('path');
+
+const app  = express();
+const PORT = process.env.PORT || 3000;
+
+// CORS
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+app.use(express.json({ limit: '50mb' }));
+app.use(express.static(__dirname));
+
+// Key 藏在环境变量里，前端看不到
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
+const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').trim();
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ══════════════════════════════════════════════════════════
+// ══ 登录 & 权限系统 ══
+// 三个角色：boss(老板，全权) / sales(业务员，只管贷款+收购车辆业务，
+// 不碰财务) / finance(财务，能看全部数据，只能新增收支登记，不能改/删
+// 任何东西，也不能碰贷款合同)。
+// 账号现在存在数据库里（car_users），老板可以在"账号管理"页面自己增删改，
+// 不用再改代码重新部署。下面这个 USERS_RAW 只是"初始种子账号"——
+// 第一次启动、数据库里还没有 car_users 这个key时，会用它来建立最初的
+// 三个账号；之后账号管理全部走数据库，改这个数组不会再生效。
+// ══════════════════════════════════════════════════════════
+const USERS_RAW = [
+  { usernames: ['gui', 'boss'], password: 'gui',    role: 'boss',    displayName: '老板' },
+  { usernames: ['caiwu'],       password: 'gui888', role: 'finance', displayName: '财务' },
+  { usernames: ['yewu'],        password: 'yewu888', role: 'sales',   displayName: '业务员' },
+];
+const VALID_ROLES = ['boss', 'finance', 'sales'];
+
+function hashPassword(password, salt) {
+  salt = salt || crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return salt + ':' + hash;
 }
-</style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-</head>
-<body>
-<div class="login-screen" id="loginScreen">
-  <div class="login-card">
-    <div class="login-logo">🚗</div>
-    <div class="login-title">MORODOK</div>
-    <div class="login-sub">汽车抵押贷款管理系统</div>
-    <div class="login-field"><label>用户名</label><input type="text" id="loginUser" placeholder="请输入用户名" autocomplete="username"></div>
-    <div class="login-field"><label>密码</label><input type="password" id="loginPass" placeholder="请输入密码" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
-    <button class="login-btn" id="loginBtn" onclick="doLogin()">登 录</button>
-    <div class="login-error" id="loginError"></div>
-    <div class="login-foot">忘记密码请联系管理员</div>
-  </div>
-</div>
-<div class="header">
-  <div class="header-title">🚗 <span>汽车抵押贷款管理系统</span></div>
-  <div class="header-right">
-    <span id="syncStatus" style="display:flex;align-items:center;gap:5px;font-size:11px">
-      <span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:#4caf50;display:inline-block"></span>
-      <span id="syncTxt">已同步</span>
-    </span>
-    <span class="chip" id="dateDisplay"></span>
-    <span class="chip" id="userChip">-</span>
-    <span class="chip" style="cursor:pointer" onclick="doLogout()">退出</span>
-  </div>
-</div>
-<div class="layout">
-  <div class="sidebar" id="sidebarEl"></div>
-  <div class="main" id="mainContent"></div>
-</div>
-<div class="mob-nav" id="mobNav">
-  <div class="mob-nav-item" id="mn_home" onclick="nav('home')"><span class="mi">🏠</span>首页</div>
-  <div class="mob-nav-item" id="mn_add" onclick="nav('add')"><span class="mi">➕</span>新增</div>
-  <div class="mob-nav-item" id="mn_list" onclick="nav('list')"><span class="mi">📋</span>列表</div>
-  <div class="mob-nav-item" id="mn_overdue" onclick="nav('overdue')"><span class="mi">⚠️</span>逾期</div>
-  <div class="mob-nav-item" onclick="toggleMobMore()"><span class="mi">☰</span>更多</div>
-</div>
-<div class="mob-more-panel" id="mobMorePanel">
-  <div class="mob-more-item" onclick="closeMobMore();nav('finance_pnl')"><span class="mmi">📊</span>利润表</div>
-  <div class="mob-more-item" onclick="closeMobMore();nav('finance_cashflow')"><span class="mmi">💰</span>现金流</div>
-  <div class="mob-more-item" onclick="closeMobMore();nav('finance_income')"><span class="mmi">💵</span>收入登记</div>
-  <div class="mob-more-item" onclick="closeMobMore();nav('finance_expense')"><span class="mmi">💸</span>支出登记</div>
-  <div class="mob-divider"></div>
-  <div class="mob-more-item" onclick="closeMobMore();nav('import')"><span class="mmi">📥</span>批量导入</div>
-  <div class="mob-more-item" onclick="closeMobMore();nav('user_manage')"><span class="mmi">👥</span>账号管理</div>
-  <div class="mob-more-item" onclick="closeMobMore();doBackup()"><span class="mmi">💾</span>备份数据</div>
-  <div class="mob-more-item" onclick="closeMobMore();doRestore()"><span class="mmi">📂</span>恢复数据</div>
-</div>
-<div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
-  <div class="modal">
-    <div class="modal-title"><span id="modalTitle"></span><button class="modal-close" onclick="closeModal()">✕</button></div>
-    <div id="modalBody"></div>
-  </div>
-</div>
-<div class="loading-overlay" id="loadingOverlay">
-  <div class="loading-spinner"></div>
-  <div class="loading-text">正在加载...</div>
-</div>
-<script>
-"use strict";
-
-// ══ 后端API配置（Key藏在服务器，前端看不到）══
-var _loans = [];
-var _editId = null;
-var _collapsedMonths = {}; // 记录折叠状态
-var _currentNav = "home";
-var _financeRecords = [];
-var _syncStatus = "idle";
-
-// ══════════════════════════════════════════════
-// ══ 登录 & 权限（真正的校验在服务器 server.js 做，前端这套只是
-// 按角色显示/隐藏功能，不是安全边界，但配合服务器就是完整的权限系统）══
-// 三个角色：boss 老板(全权) / sales 业务员(只管贷款+收购车辆业务) /
-// finance 财务(能看全部，只能新增收支登记，不能改/删任何东西)
-// ══════════════════════════════════════════════
-var AUTH_TOKEN = null, CURRENT_ROLE = null, CURRENT_USERNAME = null, CURRENT_DISPLAY = null;
-var ROLE_LABEL = {boss:"老板", finance:"财务", sales:"业务员"};
-
-function authHeaders() { return AUTH_TOKEN ? {"Authorization":"Bearer "+AUTH_TOKEN} : {}; }
-function canWriteLoans() { return CURRENT_ROLE==="boss" || CURRENT_ROLE==="sales"; }
-function canDelete() { return CURRENT_ROLE==="boss"; }
-function canViewFinance() { return CURRENT_ROLE==="boss" || CURRENT_ROLE==="finance"; }
-function canAddFinance() { return CURRENT_ROLE==="boss"; } // 财务只读：连新增收支登记都不行，记账只能老板（或业务员卖收购车那笔特例）做
-function canEditFinance() { return CURRENT_ROLE==="boss"; }
-function isBoss() { return CURRENT_ROLE==="boss"; }
-
-function showLoginScreen(msg) {
-  document.getElementById("loginScreen").style.display = "flex";
-  document.getElementById("loginError").textContent = msg || "";
-  AUTH_TOKEN = null; CURRENT_ROLE = null; CURRENT_USERNAME = null; CURRENT_DISPLAY = null;
-  try{ localStorage.removeItem("car_auth_token"); }catch(e){}
-  var pass = document.getElementById("loginPass"); if(pass) pass.value = "";
+function verifyPassword(password, stored) {
+  const parts = String(stored || '').split(':');
+  if (parts.length !== 2) return false;
+  const [salt, hash] = parts;
+  const check = crypto.scryptSync(password, salt, 64).toString('hex');
+  const a = Buffer.from(hash, 'hex'), b = Buffer.from(check, 'hex');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
-function hideLoginScreen() { document.getElementById("loginScreen").style.display = "none"; }
+function genUserId() {
+  return 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
 
-async function doLogin() {
-  var user = document.getElementById("loginUser").value.trim();
-  var pass = document.getElementById("loginPass").value;
-  var btn = document.getElementById("loginBtn");
-  var errEl = document.getElementById("loginError");
-  errEl.textContent = "";
-  if(!user || !pass) { errEl.textContent = "请输入用户名和密码"; return; }
-  btn.disabled = true; btn.textContent = "登录中...";
+// USER_RECORDS：数据库里 car_users 这一整个数组的内存副本（含密码哈希，
+// 从不下发给前端）。USERS：username -> record 的查找表，每次 USER_RECORDS
+// 变化后调用 rebuildUserIndex() 重建。
+let USER_RECORDS = [];
+let USERS = new Map();
+function rebuildUserIndex() {
+  USERS = new Map();
+  USER_RECORDS.forEach(rec => { (rec.usernames || []).forEach(name => USERS.set(name, rec)); });
+}
+async function persistUsers() {
+  const { error } = await supabase.from('pawndata').upsert([{ key: 'car_users', value: USER_RECORDS }], { onConflict: 'key' });
+  if (error) throw new Error('DB_WRITE_ERROR: ' + error.message);
+}
+async function initUsers() {
   try {
-    var res = await fetch("/api/login", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({username:user, password:pass})});
-    var data = await res.json();
-    if(!res.ok || !data.ok) { errEl.textContent = data.message || "登录失败"; btn.disabled=false; btn.textContent="登 录"; return; }
-    AUTH_TOKEN = data.token; CURRENT_ROLE = data.role; CURRENT_USERNAME = data.username; CURRENT_DISPLAY = data.displayName || ROLE_LABEL[data.role] || data.role;
-    try{ localStorage.setItem("car_auth_token", AUTH_TOKEN); }catch(e){}
-    hideLoginScreen();
-    startApp();
-  } catch(e) {
-    errEl.textContent = "网络错误，请重试";
-  }
-  btn.disabled=false; btn.textContent="登 录";
-}
-
-async function doLogout() {
-  if(!confirm("确定退出登录？")) return;
-  try{ await fetch("/api/logout",{method:"POST", headers: authHeaders()}); }catch(e){}
-  showLoginScreen("");
-}
-
-async function tryResumeSession() {
-  var saved = null;
-  try{ saved = localStorage.getItem("car_auth_token"); }catch(e){}
-  if(!saved) { showLoginScreen(); return; }
-  AUTH_TOKEN = saved;
-  try {
-    var res = await fetch("/api/me", {headers: authHeaders()});
-    if(!res.ok) throw new Error("invalid session");
-    var data = await res.json();
-    CURRENT_ROLE = data.role; CURRENT_USERNAME = data.username; CURRENT_DISPLAY = data.displayName || ROLE_LABEL[data.role] || data.role;
-    hideLoginScreen();
-    startApp();
-  } catch(e) {
-    showLoginScreen("登录已过期，请重新登录");
-  }
-}
-// ══ 与投资方合作分界日 ══
-// 2026-09-01起与投资方合作分成；此日期之前的利润归结算前所有，
-// 需要"确认提取"之后不再带入合作期核算。以后如果分界日变化，改这一行即可。
-var SETTLEMENT_CUTOFF = "2026-09-01";
-
-
-function doBackup() {
-  var today = new Date().toISOString().slice(0,10);
-  var j = JSON.stringify({car_loans:_loans, car_finance:_financeRecords},null,2);
-  var a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([j],{type:"application/json"}));
-  a.download = "CAR_backup_"+today+".json"; a.click();
-  var csv1 = ["编号,客户,手机,车牌,品牌,型号,颜色,评估价,贷款金额,实际放款,月利率%,期限,方式,状态,放款日,备注"];
-  loanRecords().forEach(function(l){csv1.push([l.id,l.name,l.phone,l.idcard||"",l.brand||"",l.model||"",l.color||"",l.estimate||0,l.amount,l.actualAmount||"",l.rate,l.term,l.repay||"",l.status,l.date,(l.note||"").replace(/,/g,"；")].join(","));});
-  setTimeout(function(){var a2=document.createElement("a");a2.href=URL.createObjectURL(new Blob(["﻿"+csv1.join("\n")],{type:"text/csv;charset=utf-8"}));a2.download="CAR_合同_"+today+".csv";a2.click();},300);
-  var csv2 = ["编号,类型,金额,分类,日期,合同编号,备注"];
-  _financeRecords.filter(function(r){return r.type==="income"||r.type==="expense";}).forEach(function(r){csv2.push([r.id,r.type==="income"?"收入":"支出",r.amount,r.category,r.date,r.loanId||"",(r.note||"").replace(/,/g,"；")].join(","));});
-  setTimeout(function(){var a3=document.createElement("a");a3.href=URL.createObjectURL(new Blob(["﻿"+csv2.join("\n")],{type:"text/csv;charset=utf-8"}));a3.download="CAR_财务_"+today+".csv";a3.click();},600);
-  setTimeout(function(){alert("✅ 备份完成！已下载3个文件");},800);
-}
-function doRestore() {
-  if(!isBoss()) { alert("⛔ 只有老板能恢复数据"); return; }
-  var inp=document.createElement("input");inp.type="file";inp.accept=".json";
-  inp.onchange=function(e){
-    var file=e.target.files[0];if(!file)return;
-    var reader=new FileReader();
-    reader.onload=async function(ev){
-      try{
-        var d=JSON.parse(ev.target.result);
-        if(!d.car_loans&&!d.car_finance){alert("❌ 无效备份文件");return;}
-        if(!confirm("确定恢复？将覆盖当前数据\n合同："+((d.car_loans||[]).length)+"条，财务："+((d.car_finance||[]).length)+"条"))return;
-        _loans=d.car_loans||[];_financeRecords=d.car_finance||[];
-        await saveLoans();alert("✅ 恢复成功！");nav("home");
-      }catch(err){alert("❌ 解析失败："+err.message);}
-    };reader.readAsText(file);
-  };inp.click();
-}
-// ══════════════════════════════════════════════
-// ══ 账号管理（老板专属）══
-// 账号数据全部存在服务器数据库里，这里只是读/写 /api/users* 这几个接口，
-// 真正的权限校验（谁能改、不能自锁老板账号等）都在服务器做了一遍，
-// 前端这套只是配合显示，不是安全边界。
-// ══════════════════════════════════════════════
-var _users = [];
-var _userFormOpen = false;
-
-async function apiUsersCall(path, method, body) {
-  try {
-    var res = await fetch(path, {
-      method: method||"GET",
-      headers: Object.assign({"Content-Type":"application/json"}, authHeaders()),
-      body: body!==undefined ? JSON.stringify(body) : undefined
-    });
-    if(res.status===401) { showLoginScreen("登录已过期，请重新登录"); return null; }
-    var data = null;
-    try { data = await res.json(); } catch(e) { data = {}; }
-    if(!res.ok || data.ok===false) { alert("❌ "+(data.message||"操作失败")); return null; }
-    return data;
-  } catch(e) { alert("❌ 网络错误，请重试"); return null; }
-}
-
-async function loadUsers() {
-  var data = await apiUsersCall("/api/users");
-  _users = (data && data.users) || [];
-}
-
-async function renderUserManage() {
-  if(!isBoss()) { alert("⛔ 只有老板能管理账号"); nav("home"); return; }
-  document.getElementById('mainContent').innerHTML = '<div class="card" style="text-align:center;padding:50px;color:var(--muted)">加载中...</div>';
-  await loadUsers();
-  renderUserManageBody();
-}
-
-function renderUserManageBody() {
-  var h='';
-  h+='<div class="page-header"><div class="page-title">👥 账号管理</div><div class="page-sub">自己新增/管理员工登录账号，改完立即生效，不用找人改代码</div></div>';
-
-  var stats = {boss:0, finance:0, sales:0};
-  _users.forEach(function(u){ if(stats[u.role]!==undefined) stats[u.role]++; });
-  h+='<div class="stats-grid" style="margin-bottom:14px">';
-  h+='<div class="stat-card blue"><div class="stat-icon">👑</div><div class="stat-label">老板</div><div class="stat-value">'+stats.boss+'</div><div class="stat-sub">人</div></div>';
-  h+='<div class="stat-card amber"><div class="stat-icon">💼</div><div class="stat-label">财务</div><div class="stat-value">'+stats.finance+'</div><div class="stat-sub">人</div></div>';
-  h+='<div class="stat-card green"><div class="stat-icon">🧑‍💼</div><div class="stat-label">业务员</div><div class="stat-value">'+stats.sales+'</div><div class="stat-sub">人</div></div>';
-  h+='</div>';
-
-  h+='<div class="btn-row" style="margin-bottom:14px"><button class="btn btn-success" onclick="_userFormOpen=!_userFormOpen;renderUserManageBody()">'+(_userFormOpen?'✖ 取消新增':'➕ 新增账号')+'</button></div>';
-
-  if(_userFormOpen) {
-    h+='<div class="card"><div class="card-title" style="margin-bottom:12px">➕ 新增员工账号</div><div class="form-grid">';
-    h+='<div class="form-group"><label>用户名（登录用）*</label><input type="text" id="u_username" placeholder="如：xiaoli，用于登录，不能重复"></div>';
-    h+='<div class="form-group"><label>显示姓名</label><input type="text" id="u_displayName" placeholder="如：小李，不填则用用户名"></div>';
-    h+='<div class="form-group"><label>角色 *</label><select id="u_role"><option value="sales">业务员</option><option value="finance">财务</option><option value="boss">老板</option></select></div>';
-    h+='<div class="form-group"><label>初始密码 *</label><input type="text" id="u_password" placeholder="至少4位，之后本人可让老板重置"></div>';
-    h+='</div>';
-    h+='<div class="btn-row"><button class="btn btn-primary" onclick="createUserAccount()">✅ 保存账号</button></div></div>';
-  }
-
-  var groups = [["boss","👑 老板"], ["finance","💼 财务"], ["sales","🧑‍💼 业务员"]];
-  groups.forEach(function(g){
-    var role = g[0], label = g[1];
-    var list = _users.filter(function(u){ return u.role===role; });
-    h+='<div class="card"><div class="card-title" style="margin-bottom:12px">'+label+'（'+list.length+'人）</div>';
-    h+='<div class="table-wrap"><table><thead><tr><th>用户名</th><th>显示姓名</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>';
-    if(list.length===0) { h+='<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">暂无账号</td></tr>'; }
-    list.forEach(function(u){
-      var isSelf = u.usernames.indexOf(CURRENT_USERNAME)!==-1;
-      var isActive = u.status==='active';
-      h+='<tr>';
-      h+='<td style="font-family:monospace;font-weight:600">'+u.usernames.join(' / ')+(isSelf?' <span class="badge badge-blue" style="margin-left:4px">我</span>':'')+'</td>';
-      h+='<td>'+(u.displayName||'—')+'</td>';
-      h+='<td>'+(isActive?'<span class="badge badge-green">启用中</span>':'<span class="badge badge-gray">已禁用</span>')+'</td>';
-      h+='<td style="font-size:12px;color:var(--muted)">'+formatDate(u.createdAt)+'</td>';
-      h+='<td style="white-space:nowrap">';
-      h+='<select style="font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid #cfd8dc;margin-right:6px" '+(isSelf?'disabled title="不能修改自己的角色"':'onchange="updateUserRole(\''+u.id+'\',this.value,\''+(u.displayName||u.username)+'\')"')+'>';
-      h+='<option value="boss" '+(u.role==='boss'?'selected':'')+'>老板</option>';
-      h+='<option value="finance" '+(u.role==='finance'?'selected':'')+'>财务</option>';
-      h+='<option value="sales" '+(u.role==='sales'?'selected':'')+'>业务员</option>';
-      h+='</select>';
-      h+='<button class="btn btn-sm btn-outline" onclick="promptResetPassword(\''+u.id+'\',\''+(u.displayName||u.username)+'\')">🔑 重置密码</button> ';
-      if(!isSelf) {
-        h+='<button class="btn btn-sm '+(isActive?'btn-outline':'btn-success')+'" onclick="toggleUserStatus(\''+u.id+'\',\''+u.status+'\',\''+(u.displayName||u.username)+'\')">'+(isActive?'🚫 禁用':'✅ 启用')+'</button> ';
-        h+='<button class="btn btn-sm btn-danger" onclick="deleteUserAccount(\''+u.id+'\',\''+(u.displayName||u.username)+'\')">删除</button>';
-      } else {
-        h+='<span style="color:var(--muted);font-size:12px">当前登录账号，不能自己禁用/删除</span>';
-      }
-      h+='</td></tr>';
-    });
-    h+='</tbody></table></div></div>';
-  });
-
-  document.getElementById('mainContent').innerHTML = h;
-}
-
-async function createUserAccount() {
-  var username = document.getElementById("u_username")?.value.trim();
-  var displayName = document.getElementById("u_displayName")?.value.trim();
-  var role = document.getElementById("u_role")?.value;
-  var password = document.getElementById("u_password")?.value;
-  if(!username) { alert("请输入用户名"); return; }
-  if(!password || password.length<4) { alert("密码至少4位"); return; }
-  var data = await apiUsersCall("/api/users", "POST", {username:username, displayName:displayName, role:role, password:password});
-  if(data) { alert("✅ 账号创建成功：「"+username+"」"); _userFormOpen=false; await loadUsers(); renderUserManageBody(); }
-}
-
-async function promptResetPassword(id, label) {
-  var pw = prompt("为「"+label+"」设置新密码（至少4位）：");
-  if(pw===null) return;
-  if(pw.length<4) { alert("密码至少4位"); return; }
-  var data = await apiUsersCall("/api/users/"+id+"/reset-password", "POST", {password:pw});
-  if(data) alert("✅ 密码已重置，该账号需要用新密码重新登录");
-}
-
-async function updateUserRole(id, role, label) {
-  if(!confirm("确定把「"+label+"」的角色改为「"+(ROLE_LABEL[role]||role)+"」？该账号会被强制重新登录。")) { renderUserManageBody(); return; }
-  await apiUsersCall("/api/users/"+id+"/update", "POST", {role:role});
-  await loadUsers(); renderUserManageBody();
-}
-
-async function toggleUserStatus(id, currentStatus, label) {
-  var next = currentStatus==='active' ? 'disabled' : 'active';
-  if(!confirm((next==='disabled'?"确定禁用":"确定启用")+"「"+label+"」的账号？"+(next==='disabled'?"禁用后该账号将无法登录。":""))) return;
-  var data = await apiUsersCall("/api/users/"+id+"/update", "POST", {status:next});
-  if(data) { await loadUsers(); renderUserManageBody(); }
-}
-
-async function deleteUserAccount(id, label) {
-  if(!confirm("确定删除账号「"+label+"」？删除后该账号将无法登录，此操作不可恢复。")) return;
-  var data = await apiUsersCall("/api/users/"+id, "DELETE");
-  if(data) { await loadUsers(); renderUserManageBody(); }
-}
-
-function buildMobNav() {
-  var map={home:"mn_home",add:"mn_add",list:"mn_list",overdue:"mn_overdue"};
-  ["mn_home","mn_add","mn_list","mn_overdue"].forEach(function(id){var el=document.getElementById(id);if(el)el.classList.remove("active");});
-  if(map[_currentNav]){var el=document.getElementById(map[_currentNav]);if(el)el.classList.add("active");}
-}
-function toggleMobMore(){var p=document.getElementById("mobMorePanel");if(p)p.classList.toggle("open");}
-function closeMobMore(){var p=document.getElementById("mobMorePanel");if(p)p.classList.remove("open");}
-
-
-// ══ 批量导入 ══
-function renderImport() {
-  var h='';
-  h+='<div class="page-header"><div class="page-title">📥 批量导入</div>';
-  h+='<div class="page-sub">从永续贷Excel表格批量导入进行中汽车合同</div></div>';
-  h+='<div class="card">';
-  h+='<div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:12px">📊 上传永续贷Excel表格</div>';
-  h+='<div id="importDrop" onclick="document.getElementById(\'importFile\').click()" ondragover="event.preventDefault();this.style.borderColor=\'#1565c0\'" ondragleave="this.style.borderColor=\'#cfd8dc\'" ondrop="handleImportDrop(event)" style="border:2px dashed #cfd8dc;border-radius:10px;padding:40px;text-align:center;cursor:pointer">';
-  h+='<div style="font-size:40px;margin-bottom:8px">📊</div>';
-  h+='<div style="font-size:14px;font-weight:600;color:var(--navy)">点击上传 或 拖拽Excel文件</div>';
-  h+='<div style="font-size:12px;color:var(--muted);margin-top:6px">支持 .xlsx · 永续贷总表</div></div>';
-  h+='<input type="file" id="importFile" accept=".xlsx" style="display:none" onchange="handleImportFile(this.files[0])">';
-  h+='<div id="importFileInfo" style="margin-top:8px;font-size:12px;color:var(--muted)"></div></div>';
-  h+='<div class="card" id="importPreviewCard" style="display:none">';
-  h+='<div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:12px">📋 预览</div>';
-  h+='<div id="importStats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px"></div>';
-  h+='<div style="overflow-x:auto"><table><thead><tr><th>操作</th><th>客户姓名</th><th>品牌</th><th>车牌</th><th>贷款金额</th><th>实际放款</th><th>月利息</th><th>还款日</th><th>负责人</th></tr></thead><tbody id="importPreviewBody"></tbody></table></div>';
-  h+='<div style="margin-top:12px;display:flex;gap:10px"><button class="btn btn-success" id="importConfirmBtn" onclick="doImportConfirm()" disabled>✅ 确认导入</button><button class="btn btn-outline" onclick="nav(\'import\')">🔄 重新上传</button></div></div>';
-  h+='<div class="card" id="importProgressCard" style="display:none">';
-  h+='<div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:10px">⏳ 导入进度</div>';
-  h+='<div style="height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden;margin-bottom:8px"><div id="importProgressFill" style="height:100%;background:#2e7d32;border-radius:3px;width:0%;transition:width .3s"></div></div>';
-  h+='<div id="importProgressText" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>';
-  h+='<div id="importLog" style="background:#1a1a2e;color:#a0e0a0;border-radius:8px;padding:12px;font-size:11px;font-family:monospace;max-height:200px;overflow-y:auto;line-height:1.8"></div>';
-  h+='<div style="margin-top:10px"><button class="btn btn-primary" id="importDoneBtn" style="display:none" onclick="nav(\'list\')">📋 查看合同列表</button></div></div>';
-  document.getElementById('mainContent').innerHTML = h;
-}
-
-function handleImportDrop(e) {
-  e.preventDefault();
-  var file=e.dataTransfer.files[0]; if(file) handleImportFile(file);
-}
-
-var _importPreview=[];
-function handleImportFile(file) {
-  if(!file||!window.XLSX){alert('请稍等，正在加载...');return;}
-  document.getElementById('importFileInfo').textContent='📄 '+file.name;
-  var reader=new FileReader();
-  reader.onload=function(e){
-    try{parseImportWorkbook(XLSX.read(e.target.result,{type:'array',cellDates:true}));}
-    catch(err){alert('解析失败: '+err.message);}
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-// ══ 日期解析通用函数 ══
-function parseDate(d) {
-  if(!d) return '';
-  if(d instanceof Date) return d.toISOString().slice(0,10);
-  if(typeof d==='number') return new Date(Math.round((d-25569)*86400*1000)).toISOString().slice(0,10);
-  if(typeof d==='string') {
-    var s=d.trim().replace(/ /g,'').replace(/\t/g,'');
-    var pts=s.split(/[\/-]/);
-    if(pts.length===3){var y=parseInt(pts[0]),mo=parseInt(pts[1]),dy=parseInt(pts[2]);if(y<100)y+=2000;return y+'-'+String(mo).padStart(2,'0')+'-'+String(dy).padStart(2,'0');}
-  }
-  return '';
-}
-
-// ══ 识别表格类型：永续贷 or 正常贷款 ══
-function detectTableType(hdr) {
-  var hasMonthly = hdr.some(function(c){return c&&String(c).includes('每期金额');});
-  var hasPeriodPrin = hdr.some(function(c){return c&&String(c).includes('应收本金');});
-  if(hasPeriodPrin) return 'normal';   // 正常贷款（先息后本/等额本息）
-  if(hasMonthly)   return 'revolving'; // 永续贷
-  return 'unknown';
-}
-
-// ══ 历史收息记录（从表格导入） ══
-var _importIncomePreview = [];
-
-function parseImportWorkbook(wb) {
-  var loanRows=[], incomeRows=[];
-  wb.SheetNames.forEach(function(sn){
-    var rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:null,raw:false});
-    var rawRows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:null});
-    var hdrIdx=-1;
-    for(var i=0;i<Math.min(rawRows.length,5);i++){
-      if(rawRows[i]&&rawRows[i].some(function(c){return c&&String(c).includes('客户名字');})){hdrIdx=i;break;}
-    }
-    if(hdrIdx<0) return;
-    var hdr=rawRows[hdrIdx];
-    var ttype=detectTableType(hdr);
-    function ci(kw){for(var j=0;j<hdr.length;j++){if(hdr[j]&&String(hdr[j]).includes(kw))return j;}return -1;}
-
-    if(ttype==='revolving') {
-      // ══ 永续贷格式 ══
-      var C={date:ci('日期'),name:ci('客户名字'),phone:ci('电话'),telegram:ci('飞机'),
-        type:ci('种类'),brand:ci('品牌'),plate:ci('车牌'),appraise:ci('评估'),
-        color:ci('颜色'),status:ci('状态'),staff:ci('客服'),
-        actual:ci('实际放款'),amount:ci('客户贷款'),monthly:ci('每期金额'),paydate:ci('还款日'),note:ci('注')};
-      for(var ri=hdrIdx+1;ri<rawRows.length;ri++){
-        var row=rawRows[ri]; if(!row||!row[C.name]) continue;
-        var vt=String(row[C.type]||'');
-        if(!vt.includes('汽车')&&!vt.includes('押证')) continue;
-        var isActive=String(row[C.status]||'').includes('进行');
-        var amt=parseFloat(row[C.amount])||0,act=parseFloat(row[C.actual])||0,mon=parseFloat(row[C.monthly])||0;
-        var ds=parseDate(row[C.date]);
-        var entry={
-          date:ds,name:String(row[C.name]||'').trim(),
-          phone:String(row[C.phone]||row[C.telegram]||'').trim(),
-          brand:String(row[C.brand]||'').trim(),plate:String(row[C.plate]||'').trim(),
-          color:String(row[C.color]||'').trim(),appraise:String(row[C.appraise]||'').trim(),
-          amount:amt,actual:act,monthly:mon,
-          haircut:amt>0&&act>0?Math.round((1-act/amt)*10000)/100:0,
-          rate:amt>0&&mon>0?Math.round(mon/amt*10000)/100:0,
-          paydate:String(row[C.paydate]||'').trim(),
-          staff:String(row[C.staff]||'').trim(),
-          note:String(row[C.note]||'').trim(),
-          repay:'永续贷',term:6
-        };
-        if(isActive) loanRows.push(entry);
-        // 历史实收利息（列17,19,21,23,25,27）
-        for(var pi=0;pi<6;pi++){
-          var recvCol=17+pi*2, dueCol=16+pi*2;
-          var recv=parseFloat(row[recvCol])||0;
-          if(recv>0) incomeRows.push({
-            name:entry.name,plate:entry.plate,sheet:sn,
-            period:pi+1,amount:recv,category:'利息收入',
-            note:sn+'第'+(pi+1)+'期'
-          });
-        }
-      }
-    } else if(ttype==='normal') {
-      // ══ 正常贷款格式 ══
-      var C2={date:ci('日期'),name:ci('客户名字'),phone:ci('电话'),telegram:ci('飞机'),
-        type:ci('种类'),brand:ci('品牌'),plate:ci('车牌'),appraise:ci('评估'),
-        color:ci('颜色'),status:ci('状态'),staff:ci('客服'),term:ci('期数'),
-        actual:ci('实际放款'),amount:ci('客户贷款'),
-        paidPrin:ci('已還本金'),unpaidPrin:ci('未還本金'),
-        paidInt:ci('已還利息'),unpaidInt:ci('未還利息'),note:ci('注')};
-      for(var ri=hdrIdx+1;ri<rawRows.length;ri++){
-        var row=rawRows[ri]; if(!row||!row[C2.name]) continue;
-        var vt=String(row[C2.type]||'');
-        if(!vt.includes('汽车')&&!vt.includes('押证')) continue;
-        var isActive=String(row[C2.status]||'').includes('进行');
-        var amt=parseFloat(row[C2.amount])||0,act=parseFloat(row[C2.actual])||0;
-        var term=parseInt(row[C2.term])||3;
-        var ds=parseDate(row[C2.date]);
-        // 判断还款方式：先息后本 or 等额本息
-        // 规律：先息后本 = 前N-1期本金为0，最后一期还全部本金
-        var repay='先息后本';
-        // 检查第1期应收本金（列11）
-        var p1prin=parseFloat(row[11])||0;
-        if(p1prin>0 && p1prin<amt) repay='等额本息';
-        // 每期利息（从应收利息推算）
-        var int1=parseFloat(row[13])||0;
-        var monthly=int1; // 先息后本：月利息固定
-        if(repay==='等额本息') monthly=p1prin+int1;
-        var rate=amt>0&&int1>0?Math.round(int1/amt*10000)/100:0;
-        var entry={
-          date:ds,name:String(row[C2.name]||'').trim(),
-          phone:String(row[C2.phone]||row[C2.telegram]||'').trim(),
-          brand:String(row[C2.brand]||'').trim(),plate:String(row[C2.plate]||'').trim(),
-          color:String(row[C2.color]||'').trim(),appraise:String(row[C2.appraise]||'').trim(),
-          amount:amt,actual:act,monthly:monthly,
-          haircut:amt>0&&act>0?Math.round((1-act/amt)*10000)/100:0,
-          rate:rate,term:term,repay:repay,
-          staff:String(row[C2.staff]||'').trim(),
-          note:String(row[C2.note]||'').trim(),
-          paydate:''
-        };
-        if(isActive) loanRows.push(entry);
-        // 历史实收：从各期实收本金+实收利息提取
-        for(var pi=0;pi<6;pi++){
-          var base=10+pi*6;
-          if(base+4>=hdr.length) break;
-          var recvPrin=parseFloat(row[base+2])||0;
-          var recvInt =parseFloat(row[base+4])||0;
-          var payDate=parseDate(row[base]);
-          if(recvInt>0) incomeRows.push({
-            name:entry.name,plate:entry.plate,sheet:sn,
-            period:pi+1,amount:recvInt,category:'利息收入',
-            date:payDate,note:sn+'第'+(pi+1)+'期利息'
-          });
-          if(recvPrin>0) incomeRows.push({
-            name:entry.name,plate:entry.plate,sheet:sn,
-            period:pi+1,amount:recvPrin,category:'本金回收',
-            date:payDate,note:sn+'第'+(pi+1)+'期本金'
-          });
-        }
-      }
-    }
-  });
-
-  if(loanRows.length===0&&incomeRows.length===0){alert('未找到汽车合同数据，请检查文件格式');return;}
-  _importPreview=loanRows;
-  _importIncomePreview=incomeRows;
-  renderImportPreview();
-}
-
-function renderImportPreview() {
-  var newCnt=0,skipCnt=0;
-  _importPreview.forEach(function(row){
-    var dup=_loans.some(function(e){return e.name===row.name&&e.plate===row.plate;});
-    row._action=dup?'skip':'new'; if(dup)skipCnt++;else newCnt++;
-  });
-  var tbody=document.getElementById('importPreviewBody'); if(!tbody) return;
-  tbody.innerHTML='';
-  _importPreview.forEach(function(row){
-    var isDup=row._action==='skip';
-    var tr=document.createElement('tr');
-    tr.innerHTML='<td><span style="font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;background:'+(isDup?'#fff3e0':'#e3f2fd')+';color:'+(isDup?'#f57c00':'#1565c0')+'">'+(isDup?'⏭ 跳过':'✅ 导入')+'</span></td>'+
-      '<td style="font-weight:600;color:var(--navy)">'+row.name+'</td><td>'+row.brand+'</td>'+
-      '<td style="font-family:monospace">'+row.plate+'</td>'+
-      '<td style="color:#1565c0;font-weight:600">$'+row.amount.toLocaleString()+'</td>'+
-      '<td style="color:#2e7d32">$'+row.actual.toLocaleString()+'</td>'+
-      '<td>$'+row.monthly+'</td><td style="font-size:11px">'+row.paydate+'</td><td>'+row.staff+'</td>';
-    tbody.appendChild(tr);
-  });
-  var incTotal=_importIncomePreview.reduce(function(s,r){return s+r.amount;},0);
-  document.getElementById('importStats').innerHTML=
-    '<div style="background:#f8f9fa;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:var(--navy)">'+_importPreview.length+'</div><div style="font-size:11px;color:var(--muted)">进行中合同</div></div>'+
-    '<div style="background:#e8f5e9;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#2e7d32">'+newCnt+'</div><div style="font-size:11px;color:var(--muted)">待导入合同</div></div>'+
-    '<div style="background:#fff3e0;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#f57c00">'+skipCnt+'</div><div style="font-size:11px;color:var(--muted)">已存在跳过</div></div>'+
-    '<div style="background:#fce4ec;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:700;color:#c62828">'+_importIncomePreview.length+'</div><div style="font-size:11px;color:var(--muted)">历史收息记录 $'+incTotal.toFixed(0)+'</div></div>';
-  document.getElementById('importPreviewCard').style.display='block';
-  var btn=document.getElementById('importConfirmBtn');
-  btn.disabled=newCnt===0;
-  btn.textContent=newCnt===0?'无新合同可导入':'✅ 确认导入 '+newCnt+' 条';
-}
-
-async function doImportConfirm() {
-  var toImport=_importPreview.filter(function(r){return r._action==='new';});
-  if(!toImport.length||!confirm('确认导入 '+toImport.length+' 条新合同？')) return;
-  document.getElementById('importPreviewCard').style.display='none';
-  document.getElementById('importProgressCard').style.display='block';
-  var logEl=document.getElementById('importLog');
-  var fill=document.getElementById('importProgressFill');
-  function log(msg,color){var d=document.createElement('div');d.style.color=color||'#a0e0a0';d.textContent='['+new Date().toLocaleTimeString()+'] '+msg;logEl.appendChild(d);logEl.scrollTop=logEl.scrollHeight;}
-  var success=0,skip=0,err=0;
-  for(var i=0;i<toImport.length;i++){
-    var row=toImport[i];
-    fill.style.width=Math.round((i+1)/toImport.length*100)+'%';
-    document.getElementById('importProgressText').textContent='进度 '+(i+1)+'/'+toImport.length;
-    var dup=_loans.some(function(e){return e.name===row.name&&e.plate===row.plate;});
-    if(dup){log('⏭ 跳过: '+row.name+' '+row.plate,'#ffd93d');skip++;continue;}
-    var id=genId();
-    // ══ 还款方式/期数用解析时已经判断好的 row.repay/row.term（先息后本/等额本息/永续贷），
-    // 不再一律当永续贷处理，这样"综合利息"等统计才准 ══
-    var impTerm = row.term || 6;
-    var impRepay = row.repay || '永续贷';
-    var impTotalRepay, impTotalInterest;
-    if(impRepay === '等额本息') {
-      // 等额本息：月供=本金+利息，总利息＝总还款－本金
-      impTotalRepay = Math.round(row.monthly*impTerm*100)/100;
-      impTotalInterest = Math.round((impTotalRepay-row.amount)*100)/100;
+    const { data, error } = await supabase.from('pawndata').select('value').eq('key', 'car_users').maybeSingle();
+    if (!error && data && Array.isArray(data.value) && data.value.length > 0) {
+      USER_RECORDS = data.value;
+      console.log(`  账号：已从数据库加载 ${USER_RECORDS.length} 个账号`);
     } else {
-      // 先息后本 / 永续贷：每期只还利息（最后一期额外还本），月供本身就是纯利息
-      impTotalInterest = Math.round(row.monthly*impTerm*100)/100;
-      impTotalRepay = Math.round((row.amount+impTotalInterest)*100)/100;
+      USER_RECORDS = USERS_RAW.map(u => ({
+        id: genUserId(), usernames: u.usernames.slice(), displayName: u.displayName,
+        role: u.role, status: 'active', passwordHash: hashPassword(u.password), createdAt: new Date().toISOString()
+      }));
+      await persistUsers();
+      console.log('  账号：数据库中未找到账号数据，已写入初始种子账号（gui/boss, caiwu, yewu）');
     }
-    var loan={id:id,name:row.name,phone:row.phone,idcard:'',brand:row.brand,model:'',color:row.color,
-      plate:row.plate,estimate:row.appraise,amount:row.amount,actualAmount:row.actual,
-      haircut:row.haircut,rate:row.rate,monthly:row.monthly,term:impTerm,repay:impRepay,status:'active',
-      date:row.date||new Date().toISOString().slice(0,10),
-      note:(row.paydate?'还款日:'+row.paydate+' ':'')+row.note,
-      totalRepay:impTotalRepay,totalInterest:impTotalInterest,schedule:[]};
-    _loans.push(loan);
-    try{
-      await saveLoans();
-      log('✅ ['+id+'] '+row.name+' · '+row.plate+' · $'+row.amount,'#a0e0a0');
-      success++;
-    }catch(e2){log('❌ 失败: '+row.name,'#ff6b6b');_loans.pop();err++;}
-    await new Promise(function(res){setTimeout(res,200);});
+  } catch (e) {
+    console.error('  账号：初始化失败，使用内存种子账号兜底：', e.message);
+    USER_RECORDS = USERS_RAW.map(u => ({
+      id: genUserId(), usernames: u.usernames.slice(), displayName: u.displayName,
+      role: u.role, status: 'active', passwordHash: hashPassword(u.password), createdAt: new Date().toISOString()
+    }));
   }
-  fill.style.width='100%';
-  log('──────────────────','#6bcbff');
-  log('合同导入完成！新增:'+success+' 跳过:'+skip+' 失败:'+err,'#6bcbff');
+  rebuildUserIndex();
+}
+function sanitizeUser(rec) {
+  return { id: rec.id, username: rec.usernames[0], usernames: rec.usernames, displayName: rec.displayName, role: rec.role, status: rec.status, createdAt: rec.createdAt };
+}
+function activeBossCount() {
+  return USER_RECORDS.filter(r => r.role === 'boss' && r.status === 'active').length;
+}
+function invalidateSessionsFor(usernames) {
+  sessions.forEach((sess, token) => { if (usernames.indexOf(sess.username) !== -1) sessions.delete(token); });
+}
 
-  // ══ 导入历史收息记录 ══
-  if(_importIncomePreview.length>0) {
-    log('──────────────────','#6bcbff');
-    log('开始导入历史收息记录 '+_importIncomePreview.length+' 条...','#6bcbff');
-    var incSuccess=0;
-    for(var ii=0;ii<_importIncomePreview.length;ii++){
-      var ir=_importIncomePreview[ii];
-      // 找关联合同ID
-      var loan=_loans.find(function(l){return l.name===ir.name&&l.plate===ir.plate;});
-      var rec={
-        id:'F'+Date.now()+'_'+ii,
-        type:'income',
-        amount:ir.amount,
-        category:ir.category||'利息收入',
-        date:ir.date||new Date().toISOString().slice(0,10),
-        loanId:loan?loan.id:'',
-        note:ir.note||''
-      };
-      _financeRecords.unshift(rec);
-      incSuccess++;
-    }
-    try{
-      await saveLoans();
-      log('收息记录导入完成！共'+incSuccess+'条','#a0e0a0');
-    }catch(e3){log('收息记录保存失败: '+e3.message,'#ff6b6b');}
+const sessions = new Map(); // token -> {username, role, displayName, ts}
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12小时不操作就要求重新登录
+
+function auth(req, res, next) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+  const sess = sessions.get(token);
+  if (!sess || (Date.now() - sess.ts) > SESSION_TTL_MS) {
+    sessions.delete(token);
+    return res.status(401).json({ error: 'UNAUTHORIZED', message: '请重新登录' });
   }
-
-  log('══════════════════','#6bcbff');
-  log('全部完成！','#6bcbff');
-  document.getElementById('importDoneBtn').style.display='inline-block';
+  sess.ts = Date.now(); // 续期
+  req.user = sess;
+  next();
 }
 
-function setSyncStatus(s) {
-  _syncStatus = s;
-  var dot = document.getElementById("syncDot");
-  var txt = document.getElementById("syncTxt");
-  if(!dot||!txt) return;
-  if(s==="syncing"){dot.style.background="#ff9800";txt.textContent="同步中...";}
-  else if(s==="ok"){dot.style.background="#4caf50";txt.textContent="已同步";}
-  else if(s==="error"){dot.style.background="#f44336";txt.textContent="同步失败";}
-}
-
-// ══ 通过后端API读写数据（Supabase Key不暴露）══
-async function saveLoans() {
-  try {
-    setSyncStatus("syncing");
-    var res = await fetch("/api/data", {
-      method:"POST",
-      headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
-      body:JSON.stringify({car_loans:_loans, car_finance:_financeRecords})
-    });
-    if(res.status===401) { setSyncStatus("error"); showLoginScreen("登录已过期，请重新登录"); return; }
-    if(res.status===403) { setSyncStatus("error"); var d=await res.json().catch(function(){return{};}); alert("❌ 无权限："+(d.message||"操作被拒绝，请刷新页面重新加载最新数据")); return; }
-    if(res.ok) setSyncStatus("ok"); else setSyncStatus("error");
-  } catch(e) { setSyncStatus("error"); }
-}
-async function saveFinance() {
-  try {
-    setSyncStatus("syncing");
-    var res = await fetch("/api/data", {
-      method:"POST",
-      headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
-      body:JSON.stringify({car_finance:_financeRecords})
-    });
-    if(res.status===401) { setSyncStatus("error"); showLoginScreen("登录已过期，请重新登录"); return; }
-    if(res.status===403) { setSyncStatus("error"); var d=await res.json().catch(function(){return{};}); alert("❌ 无权限："+(d.message||"操作被拒绝，请刷新页面重新加载最新数据")); return; }
-    if(res.ok) setSyncStatus("ok"); else setSyncStatus("error");
-  } catch(e) { setSyncStatus("error"); }
-}
-async function loadAllData() {
-  try {
-    setSyncStatus("syncing");
-    var res = await fetch("/api/data", {headers: authHeaders()});
-    if(res.status===401) { setSyncStatus("error"); showLoginScreen("登录已过期，请重新登录"); throw new Error("unauthorized"); }
-    var data = await res.json();
-    _loans = data.car_loans || [];
-    _financeRecords = data.car_finance || [];
-    setSyncStatus("ok");
-  } catch(e) {
-    setSyncStatus("error");
-    _loans = [];
-    _financeRecords = [];
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body || {};
+  const rec = USERS.get(String(username || '').trim());
+  if (!rec || !verifyPassword(String(password || ''), rec.passwordHash)) {
+    return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: '用户名或密码错误' });
   }
-}
-function formatDate(d) { if(!d) return "-"; var dt=new Date(d); return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0"); }
-function formatMoney(n) { return "¥"+Number(n).toLocaleString(); }
-// 砍头息 = 贷款金额 − 实际放款金额（精确，直接用两个原始数字相减）；
-// 只有当实际放款金额缺失时，才退回用砍头%估算（砍头%本身是四舍五入过的，会有误差）
-function loanHaircutAmount(l) {
-  if(l.actualAmount!=null && l.amount>0) return l.amount - l.actualAmount;
-  return l.amount*(l.haircut||0)/100;
-}
-// ══ 综合利息 = 砍头息 + 整个合同期限内的利息总额 ══
-// 这笔合同真正的利息收益：砍头息是放款那一刻就赚到的，月息/永续息是分期收的，
-// 两个加起来才是这笔单子实际的利息成本。totalInterest 是合同保存时按还款方式
-// （先息后本/等额本息/永续贷）算出来的整期利息总额，新增/编辑合同、批量导入时都会存。
-function loanComprehensiveInterest(l) {
-  return loanHaircutAmount(l) + (l.totalInterest||0);
-}
-// 综合利息占实际放款的比例，方便横向比较不同单子的真实收益率
-function loanComprehensiveInterestPct(l) {
-  var base = l.actualAmount!=null ? l.actualAmount : (l.amount||0);
-  if(!base) return 0;
-  return Math.round(loanComprehensiveInterest(l)/base*10000)/100;
-}
-
-// ══ 收购车辆（公司收购持有，等待转卖的车） vs 抵押车辆（放贷抵押车）══
-// 两者共用 _loans 数组/car_loans 存储，用 assetType==='acquired' 区分，
-// 这样不需要改后端 server.js 的白名单字段即可上线。
-// 抵押贷款相关的统计/报表一律要排除收购车辆，用 loanRecords() 代替直接用 _loans。
-function isAcquired(l) { return !!(l && l.assetType === "acquired"); }
-function loanRecords() { return _loans.filter(function(l){ return !isAcquired(l); }); }
-function acquiredRecords() { return _loans.filter(isAcquired); }
-function genAcquiredId() {
-  var d = new Date();
-  var prefix = "AQ"+d.getFullYear()+String(d.getMonth()+1).padStart(2,"0");
-  var n = 1;
-  for(var i=0;i<_loans.length;i++) {
-    if(_loans[i].id && _loans[i].id.startsWith(prefix)) {
-      var num = parseInt(_loans[i].id.slice(-3)) || 0;
-      if(num >= n) n = num+1;
-    }
+  if (rec.status !== 'active') {
+    return res.status(401).json({ error: 'ACCOUNT_DISABLED', message: '此账号已被禁用，请联系管理员' });
   }
-  return prefix+String(n).padStart(3,"0");
-}
-// 收购车利润（只有已售出才算）= 成交价 − 采购成本 − 额外支出
-function acquiredProfit(a) {
-  if(a.status!=="sold" || a.saleAmount==null) return null;
-  return (a.saleAmount||0) - (a.amount||0) - (a.extraCost||0);
-}
+  const token = crypto.randomBytes(24).toString('hex');
+  sessions.set(token, { username: String(username).trim(), role: rec.role, displayName: rec.displayName, ts: Date.now() });
+  res.json({ ok: true, token, role: rec.role, displayName: rec.displayName, username: String(username).trim() });
+});
 
-// ══ 利润结算（与投资方合作分界）══
-// 砍头息按"放款日期"归属，利息/其他收入/支出/收购车利润按"财务记录实际发生日期"归属，
-// 两者都天然带日期字段，直接用分界日切一刀即可，不需要额外改数据结构。
-function isBeforeCutoff(dateStr) { return !!dateStr && String(dateStr) < SETTLEMENT_CUTOFF; }
-function isFromCutoff(dateStr) { return !!dateStr && String(dateStr) >= SETTLEMENT_CUTOFF; }
-function computeProfitBreakdown(datePredicate) {
-  var lr = loanRecords();
-  var haircut = lr.filter(function(l){return datePredicate(l.date);}).reduce(function(s,l){return s+loanHaircutAmount(l);},0);
-  var interestIncome = _financeRecords.filter(function(r){return r.type==="income"&&r.category==="利息收入"&&datePredicate(r.date);}).reduce(function(s,r){return s+r.amount;},0);
-  var otherIncome = _financeRecords.filter(function(r){return r.type==="income"&&r.category!=="利息收入"&&r.category!=="本金回收"&&datePredicate(r.date);}).reduce(function(s,r){return s+r.amount;},0);
-  var expense = _financeRecords.filter(function(r){return r.type==="expense"&&datePredicate(r.date);}).reduce(function(s,r){return s+r.amount;},0);
-  var prinRecov = _financeRecords.filter(function(r){return r.type==="income"&&r.category==="本金回收"&&datePredicate(r.date);}).reduce(function(s,r){return s+r.amount;},0);
-  var netProfit = haircut + interestIncome + otherIncome - expense;
-  return {haircut:haircut, interestIncome:interestIncome, otherIncome:otherIncome, expense:expense, prinRecov:prinRecov, netProfit:netProfit};
-}
+app.post('/api/logout', auth, (req, res) => {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+  sessions.delete(token);
+  res.json({ ok: true });
+});
 
-// ══ 三种还款方式计算引擎 ══
-function calcRepay(amount, rate, term, repay, haircut) {
-  // amount: 贷款金额(合同面值), rate: 月利率%, term: 期数, repay: 还款方式, haircut: 砍头比例%
-  var r = (rate||0) / 100;
-  var hc = (haircut||0) / 100;
-  var actual = amount * (1 - hc); // 实际放款
-  var res = { actual: Math.round(actual*100)/100, monthly:0, totalRepay:0, totalInterest:0, schedule:[] };
-  if(repay === "先息后本") {
-    // 每期只还利息，最后一期还本金+利息
-    var interest = Math.round(amount * r * 100) / 100;
-    res.monthly = interest;
-    res.totalInterest = Math.round(amount * r * term * 100) / 100;
-    res.totalRepay = Math.round((amount + res.totalInterest) * 100) / 100;
-    for(var i=1;i<=term;i++) {
-      res.schedule.push({ period:i, principal: i===term ? amount : 0, interest: interest, total: i===term ? amount+interest : interest });
-    }
-  } else if(repay === "永续贷") {
-    // 只还利息，本金不动
-    var interest = Math.round(amount * r * 100) / 100;
-    res.monthly = interest;
-    res.totalInterest = Math.round(amount * r * term * 100) / 100;
-    res.totalRepay = Math.round((amount + res.totalInterest) * 100) / 100;
-    for(var i=1;i<=term;i++) {
-      res.schedule.push({ period:i, principal: i===term ? amount : 0, interest: interest, total: i===term ? amount+interest : interest, note: i===term?'':'利息' });
-    }
-  } else {
-    // 等额本息（默认）: 每期还固定金额(本+息)
-    if(r === 0) {
-      var p = Math.round(amount/term*100)/100;
-      res.monthly = p;
-      res.totalRepay = amount;
-      res.totalInterest = 0;
-      for(var i=1;i<=term;i++) res.schedule.push({period:i,principal:p,interest:0,total:p});
-    } else {
-      var monthly = amount * r * Math.pow(1+r,term) / (Math.pow(1+r,term)-1);
-      monthly = Math.round(monthly*100)/100;
-      res.monthly = monthly;
-      var remain = amount;
-      var totalInt = 0;
-      for(var i=1;i<=term;i++) {
-        var intPart = Math.round(remain * r * 100) / 100;
-        var prinPart = Math.round((monthly - intPart) * 100) / 100;
-        if(i===term) prinPart = Math.round(remain*100)/100; // 最后一期还清余额
-        totalInt += intPart;
-        remain -= prinPart;
-        res.schedule.push({period:i, principal:prinPart, interest:intPart, total:Math.round((prinPart+intPart)*100)/100});
-      }
-      res.totalInterest = Math.round(totalInt*100)/100;
-      res.totalRepay = Math.round((amount+totalInt)*100)/100;
-    }
-  }
-  return res;
-}
-// 兼容旧调用
-function calcMonthly(amount, rate, term, repay) {
-  var res = calcRepay(amount, rate||0, term||1, repay||"等额本息", 0);
-  return res.monthly;
-}
+app.get('/api/me', auth, (req, res) => {
+  res.json({ ok: true, username: req.user.username, role: req.user.role, displayName: req.user.displayName });
+});
 
-function statusHtml(s) {
-  var m = {active:["还款中","badge-green"], pending:["审核中","badge-amber"], overdue:["已逾期","badge-red"], closed:["已结清","badge-gray"]};
-  var r = m[s] || ["未知","badge-amber"];
-  return "<span class=\"badge "+r[1]+"\">"+r[0]+"</span>";
-}
-
-function genId() {
-  var d = new Date();
-  var prefix = "CL"+d.getFullYear()+String(d.getMonth()+1).padStart(2,"0");
-  var n = 1;
-  for(var i=0;i<_loans.length;i++) {
-    if(_loans[i].id && _loans[i].id.startsWith(prefix)) {
-      var num = parseInt(_loans[i].id.slice(-3)) || 0;
-      if(num >= n) n = num+1;
-    }
-  }
-  return prefix+String(n).padStart(3,"0");
-}
-
-// ══ 按角色决定侧边栏能看到哪些页面（真正拦截在服务器，这里只是不给你看/点入口）══
-function buildSidebar() {
-  var items = [
-    {sec:"主菜单"},
-    {id:"home", icon:"🏠", label:"系统首页"},
-  ];
-  items.push({sec:"业务管理"});
-  if(canWriteLoans()) items.push({id:"add", icon:"➕", label:"新增贷款"});
-  items.push({id:"list", icon:"📋", label:"贷款列表"});
-  items.push({id:"acquired_list", icon:"🚙", label:"收购车辆"});
-  if(canWriteLoans()) items.push({id:"import", icon:"📥", label:"批量导入"});
-  if(canViewFinance()) {
-    items.push({sec:"财务管理"});
-    items.push({id:"finance_pnl", icon:"📊", label:"利润表"});
-    items.push({id:"settlement", icon:"🧾", label:"历史结算"});
-    items.push({id:"finance_cashflow", icon:"💰", label:"现金流"});
-    items.push({id:"finance_income", icon:"💵", label:canAddFinance()?"收入登记":"收入记录（只读）"});
-    items.push({id:"finance_expense", icon:"💸", label:canAddFinance()?"支出登记":"支出记录（只读）"});
-  }
-  items.push({sec:"风控提醒"});
-  items.push({id:"overdue", icon:"⚠️", label:"逾期催收"});
-  if(isBoss()) {
-    items.push({sec:"系统设置"});
-    items.push({id:"user_manage", icon:"👥", label:"账号管理"});
-    items.push({id:"backup", icon:"💾", label:"备份数据"});
-    items.push({id:"restore", icon:"📂", label:"恢复数据"});
-  }
-  var h = '<div class="sb-logo"><div class="sb-logo-sub">MORODOK</div><div class="sb-logo-name">车贷管理</div></div>';
-  for(var i=0;i<items.length;i++) {
-    var it = items[i];
-    if(it.sec) { h += '<div class="sb-label">'+it.sec+'</div>'; }
-    else {
-      var cls = (it.id===_currentNav) ? "nav-item active" : "nav-item";
-      h += '<div class="'+cls+'" onclick="nav(\''+it.id+'\')"><span class="nav-icon">'+it.icon+'</span>'+it.label+'</div>';
-    }
-  }
-  document.getElementById("sidebarEl").innerHTML = h;
-}
-
-// ══ 页面级权限校验（前端拦截，真正的数据保护在服务器）══
-var PAGE_REQUIRES = {
-  add:"writeLoans", acquired_add:"writeLoans", import:"writeLoans",
-  backup:"boss", restore:"boss", user_manage:"boss",
-  finance_pnl:"viewFinance", settlement:"viewFinance", finance_cashflow:"viewFinance",
-  haircut_detail:"viewFinance", interest_detail:"viewFinance", profit_detail:"viewFinance",
-  finance_income:"viewFinance", finance_expense:"viewFinance"
-};
-function pageAllowed(page) {
-  var req = PAGE_REQUIRES[page];
-  if(!req) return true;
-  if(req==="boss") return isBoss();
-  if(req==="writeLoans") return canWriteLoans();
-  if(req==="viewFinance") return canViewFinance();
-  if(req==="addFinance") return canAddFinance();
+// ══ 账号管理（老板专属：自己新增/改角色/重置密码/启用禁用/删除员工账号）══
+function requireBoss(req, res) {
+  if (req.user.role !== 'boss') { res.status(403).json({ error: 'PERMISSION_DENIED', message: '只有老板能管理账号' }); return false; }
   return true;
 }
-function nav(page) {
-  if(!pageAllowed(page)) { alert("⛔ 你的账号（"+(CURRENT_DISPLAY||CURRENT_ROLE)+"）没有权限查看此页面"); page="home"; }
-  _currentNav = page;
-  buildSidebar(); buildMobNav(); closeMobMore();
-  window.scrollTo(0,0);
-  document.getElementById("loadingOverlay").classList.remove("show");
-  if(page==="home") renderHome();
-  else if(page==="add") renderAddForm();
-  else if(page==="list") renderList();
-  else if(page==="finance_pnl") renderFinancePnL();
-  else if(page==="finance_cashflow") renderCashFlow();
-  else if(page==="finance_income") renderFinanceForm("income");
-  else if(page==="finance_expense") renderFinanceForm("expense");
-  else if(page==="overdue") renderOverdue();
-  else if(page==="backup") { doBackup(); _currentNav="home"; buildSidebar(); buildMobNav(); }
-  else if(page==="restore") { doRestore(); _currentNav="home"; buildSidebar(); buildMobNav(); }
-  else if(page==="import") renderImport();
-  else if(page==="haircut_detail") renderHaircutDetail();
-  else if(page==="interest_detail") renderInterestDetail();
-  else if(page==="profit_detail") renderProfitDetail();
-  else if(page==="acquired_list") renderAcquiredList();
-  else if(page==="acquired_add") renderAcquiredForm();
-  else if(page==="settlement") renderSettlement();
-  else if(page==="user_manage") renderUserManage();
-}
+app.get('/api/users', auth, (req, res) => {
+  if (!requireBoss(req, res)) return;
+  res.json({ ok: true, users: USER_RECORDS.map(sanitizeUser) });
+});
+app.post('/api/users', auth, async (req, res) => {
+  if (!requireBoss(req, res)) return;
+  try {
+    const username = String((req.body || {}).username || '').trim();
+    const displayName = String((req.body || {}).displayName || '').trim() || username;
+    const role = String((req.body || {}).role || '').trim();
+    const password = String((req.body || {}).password || '');
+    if (!username) return res.status(400).json({ error: 'BAD_INPUT', message: '请输入用户名' });
+    if (VALID_ROLES.indexOf(role) === -1) return res.status(400).json({ error: 'BAD_INPUT', message: '角色不合法' });
+    if (password.length < 4) return res.status(400).json({ error: 'BAD_INPUT', message: '密码至少需要4位' });
+    const lower = username.toLowerCase();
+    const dup = USER_RECORDS.some(r => (r.usernames || []).some(n => n.toLowerCase() === lower));
+    if (dup) return res.status(400).json({ error: 'DUP_USERNAME', message: '这个用户名已经被使用了' });
+    const rec = { id: genUserId(), usernames: [username], displayName, role, status: 'active', passwordHash: hashPassword(password), createdAt: new Date().toISOString() };
+    USER_RECORDS.push(rec);
+    await persistUsers();
+    rebuildUserIndex();
+    res.json({ ok: true, user: sanitizeUser(rec) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/users/:id/reset-password', auth, async (req, res) => {
+  if (!requireBoss(req, res)) return;
+  try {
+    const rec = USER_RECORDS.find(r => r.id === req.params.id);
+    if (!rec) return res.status(404).json({ error: 'NOT_FOUND', message: '账号不存在' });
+    const password = String((req.body || {}).password || '');
+    if (password.length < 4) return res.status(400).json({ error: 'BAD_INPUT', message: '密码至少需要4位' });
+    rec.passwordHash = hashPassword(password);
+    await persistUsers();
+    rebuildUserIndex();
+    invalidateSessionsFor(rec.usernames);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/users/:id/update', auth, async (req, res) => {
+  if (!requireBoss(req, res)) return;
+  try {
+    const rec = USER_RECORDS.find(r => r.id === req.params.id);
+    if (!rec) return res.status(404).json({ error: 'NOT_FOUND', message: '账号不存在' });
+    const body = req.body || {};
+    const isSelf = (rec.usernames || []).indexOf(req.user.username) !== -1;
+    if (body.role !== undefined) {
+      const role = String(body.role).trim();
+      if (VALID_ROLES.indexOf(role) === -1) return res.status(400).json({ error: 'BAD_INPUT', message: '角色不合法' });
+      if (isSelf && role !== 'boss') return res.status(400).json({ error: 'SELF_LOCK', message: '不能把自己正在登录的老板账号改成别的角色，请用另一个老板账号操作' });
+      if (rec.role === 'boss' && role !== 'boss' && rec.status === 'active' && activeBossCount() <= 1) {
+        return res.status(400).json({ error: 'LAST_BOSS', message: '系统至少要保留一个启用中的老板账号' });
+      }
+      rec.role = role;
+    }
+    if (body.status !== undefined) {
+      const status = String(body.status).trim();
+      if (['active', 'disabled'].indexOf(status) === -1) return res.status(400).json({ error: 'BAD_INPUT', message: '状态不合法' });
+      if (isSelf && status === 'disabled') return res.status(400).json({ error: 'SELF_LOCK', message: '不能禁用自己正在登录的账号' });
+      if (rec.role === 'boss' && status === 'disabled' && activeBossCount() <= 1) {
+        return res.status(400).json({ error: 'LAST_BOSS', message: '系统至少要保留一个启用中的老板账号' });
+      }
+      rec.status = status;
+    }
+    if (body.displayName !== undefined) {
+      const dn = String(body.displayName).trim();
+      if (dn) rec.displayName = dn;
+    }
+    await persistUsers();
+    rebuildUserIndex();
+    if (body.role !== undefined || body.status !== undefined) invalidateSessionsFor(rec.usernames);
+    res.json({ ok: true, user: sanitizeUser(rec) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/users/:id', auth, async (req, res) => {
+  if (!requireBoss(req, res)) return;
+  try {
+    const rec = USER_RECORDS.find(r => r.id === req.params.id);
+    if (!rec) return res.status(404).json({ error: 'NOT_FOUND', message: '账号不存在' });
+    const isSelf = (rec.usernames || []).indexOf(req.user.username) !== -1;
+    if (isSelf) return res.status(400).json({ error: 'SELF_LOCK', message: '不能删除自己正在登录的账号' });
+    if (rec.role === 'boss' && rec.status === 'active' && activeBossCount() <= 1) {
+      return res.status(400).json({ error: 'LAST_BOSS', message: '系统至少要保留一个启用中的老板账号' });
+    }
+    USER_RECORDS = USER_RECORDS.filter(r => r.id !== rec.id);
+    await persistUsers();
+    rebuildUserIndex();
+    invalidateSessionsFor(rec.usernames);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
-// ══ 首页数字点进去看明细 ══
-// ══ 三个明细页统一支持"周期切换"：合作期(9/1起，默认) / 历史(9/1前) / 全部历史 ══
-// 一次提取之后，日常默认只看"合作期"，需要对账翻旧账时切到"历史"或"全部"，不用两套页面。
-function scopeDatePredicate(scope) {
-  if(scope==="pre") return isBeforeCutoff;
-  if(scope==="all") return function(){ return true; };
-  return isFromCutoff; // 默认 post
-}
-function scopeLabel(scope) {
-  if(scope==="pre") return "历史（"+SETTLEMENT_CUTOFF+" 前）";
-  if(scope==="all") return "全部历史（不分日期）";
-  return "合作期（"+SETTLEMENT_CUTOFF+" 起）";
-}
-function scopeToggleHtml(fnName, scope) {
-  var opts = [["post","合作期"],["pre","历史"],["all","全部"]];
-  var h = '<div style="display:flex;gap:6px;margin-bottom:12px">';
-  opts.forEach(function(o){
-    var active = o[0]===scope;
-    h += '<button class="btn btn-sm '+(active?'btn-primary':'btn-outline')+'" onclick="'+fnName+'(\''+o[0]+'\')">'+o[1]+'</button>';
+// ══ 每个角色对 car_loans / car_finance 两个数组的权限 ══
+// add: 能不能新增记录；edit: 能不能改已有记录；del: 能不能删除已有记录
+// sales 的 car_finance.add 是特例：只允许新增"收购车辆销售利润"这一类记录
+// （卖收购车自动生成的那笔流水），因为这属于业务员的收购车辆业务本身，
+// 不算"碰财务"；其他财务记录一律不能碰。
+// finance 现在是完全只读：能看利润表/现金流/历史结算/收支记录，但新增/编辑/
+// 删除财务记录、贷款合同全都不行——记账只能老板（或业务员卖收购车那一笔）来做，
+// 财务只负责查看/核对，不经手数据本身。
+const ROLE_PERMS = {
+  boss:    { car_loans: { add: true,  edit: true,  del: true  }, car_finance: { add: true,               edit: true,  del: true  } },
+  sales:   { car_loans: { add: true,  edit: true,  del: false }, car_finance: { add: 'acquired_sale_only', edit: false, del: false } },
+  finance: { car_loans: { add: false, edit: false, del: false }, car_finance: { add: false,               edit: false, del: false } },
+};
+
+function diffById(oldArr, newArr) {
+  oldArr = Array.isArray(oldArr) ? oldArr : [];
+  newArr = Array.isArray(newArr) ? newArr : [];
+  const oldMap = new Map(oldArr.map(x => [x.id, x]));
+  const newMap = new Map(newArr.map(x => [x.id, x]));
+  const added = [], edited = [], removed = [];
+  newMap.forEach((item, id) => {
+    if (!oldMap.has(id)) added.push(item);
+    else if (JSON.stringify(oldMap.get(id)) !== JSON.stringify(item)) edited.push(item);
   });
-  h += '</div>';
-  return h;
+  oldMap.forEach((item, id) => { if (!newMap.has(id)) removed.push(item); });
+  return { added, edited, removed };
 }
 
-function renderHaircutDetail(scope) {
-  scope = scope || "post";
-  var pred = scopeDatePredicate(scope);
-  var rows = loanRecords().filter(function(l){ return pred(l.date); }).map(function(l){
-    return {l:l, hc: loanHaircutAmount(l)};
-  }).sort(function(a,b){ return b.hc - a.hc; });
-  var total = rows.reduce(function(s,r){ return s+r.hc; },0);
-  var h = '<div class="page-header"><div class="page-title">✂️ 砍头息明细 · '+scopeLabel(scope)+'</div><div class="page-sub">砍头息 = 贷款金额 − 实际放款金额，按放款日期归属到对应周期</div></div>';
-  h += scopeToggleHtml('renderHaircutDetail', scope);
-  h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>砍头息</th><th>放款日</th></tr></thead><tbody>';
-  if(rows.length===0) h += '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">此周期无记录</td></tr>';
-  rows.forEach(function(r){
-    h += '<tr><td style="font-weight:600;color:var(--sky)">'+r.l.id+'</td><td>'+r.l.name+'</td><td>'+formatMoney(r.l.amount)+'</td><td>'+formatMoney(r.l.actualAmount||0)+'</td><td style="color:#f57c00">'+(r.l.haircut||0)+'%</td><td style="font-weight:700;color:#e65100">'+formatMoney(r.hc)+'</td><td style="font-size:12px;color:var(--muted)">'+formatDate(r.l.date)+'</td></tr>';
-  });
-  h += '<tr style="font-weight:700;background:#f5f5f5"><td colspan="5">合计（'+rows.length+'笔）</td><td style="color:#e65100">'+formatMoney(total)+'</td><td></td></tr>';
-  h += '</tbody></table></div></div>';
-  h += '<div class="btn-row"><button class="btn btn-outline" onclick="nav(\'home\')">← 返回首页</button></div>';
-  document.getElementById('mainContent').innerHTML = h;
-}
-
-function renderInterestDetail(scope) {
-  scope = scope || "post";
-  var pred = scopeDatePredicate(scope);
-  var recs = _financeRecords.filter(function(r){ return r.type==='income' && r.category==='利息收入' && pred(r.date); }).slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
-  var total = recs.reduce(function(s,r){ return s+r.amount; },0);
-  var h = '<div class="page-header"><div class="page-title">💰 利息收入明细 · '+scopeLabel(scope)+'</div><div class="page-sub">"收入登记"里分类为"利息收入"的记录，按实收日期归属到对应周期（不含本金回收）</div></div>';
-  h += scopeToggleHtml('renderInterestDetail', scope);
-  h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>日期</th><th>金额</th><th>关联合同</th><th>客户</th><th>备注</th></tr></thead><tbody>';
-  if(recs.length===0) h += '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">此周期无记录</td></tr>';
-  recs.forEach(function(r){
-    var loan = r.loanId ? _loans.find(function(l){ return l.id===r.loanId; }) : null;
-    h += '<tr><td>'+formatDate(r.date)+'</td><td style="font-weight:600;color:#2e7d32">'+formatMoney(r.amount)+'</td><td>'+(r.loanId||'—')+'</td><td>'+(loan?loan.name:'—')+'</td><td style="color:var(--muted);font-size:12px">'+(r.note||'')+'</td></tr>';
-  });
-  h += '<tr style="font-weight:700;background:#f5f5f5"><td>合计（'+recs.length+'笔）</td><td style="color:#2e7d32">'+formatMoney(total)+'</td><td colspan="3"></td></tr>';
-  h += '</tbody></table></div></div>';
-  h += '<div class="btn-row"><button class="btn btn-outline" onclick="nav(\'home\')">← 返回首页</button></div>';
-  document.getElementById('mainContent').innerHTML = h;
-}
-
-function renderProfitDetail(scope) {
-  scope = scope || "post";
-  var b = computeProfitBreakdown(scopeDatePredicate(scope));
-
-  function row(label,amount,color,note,link){
-    return '<tr><td>'+(link?'<a href="javascript:void(0)" onclick="'+link+"('"+scope+"')"+'" style="color:var(--sky);text-decoration:underline">'+label+'</a>':label)+'</td><td style="text-align:right;font-weight:700;color:'+color+'">'+formatMoney(amount)+'</td><td style="font-size:11px;color:var(--muted)">'+note+'</td></tr>';
-  }
-  var h = '<div class="page-header"><div class="page-title">📈 净利润是怎么算出来的 · '+scopeLabel(scope)+'</div><div class="page-sub">净利润 = 砍头息 + 利息收入 + 其他收入 − 运营支出（本金回收不计入）</div></div>';
-  h += scopeToggleHtml('renderProfitDetail', scope);
-  h += '<div class="card"><table style="width:100%;border-collapse:collapse">';
-  h += row('① 砍头息合计（点击看每笔合同）', b.haircut, '#e65100', '按放款日期归属到本周期', 'renderHaircutDetail');
-  h += row('② 利息收入合计（点击看每笔流水）', b.interestIncome, '#2e7d32', '按实收日期归属到本周期', 'renderInterestDetail');
-  h += row('③ 其他收入合计', b.otherIncome, '#2e7d32', '手续费/滞纳金/其他收入等分类（不含利息收入、本金回收）', null);
-  h += row('④ 运营支出合计', -b.expense, '#c62828', '按发生日期归属到本周期', null);
-  h += '<tr style="border-top:2px solid #333"><td style="font-weight:700;padding-top:10px">净利润 = ① + ② + ③ − ④</td><td style="text-align:right;font-weight:700;padding-top:10px;color:'+(b.netProfit>=0?'#2e7d32':'#c62828')+'">'+formatMoney(b.netProfit)+'</td><td></td></tr>';
-  h += '</table></div>';
-  h += '<div class="card"><div style="font-size:12px;color:var(--muted)">⚠️ 本金回收（本周期 '+formatMoney(b.prinRecov)+'）不计入净利润，只是资金回流——客户还的本金本来就是你放出去的钱，收回来不是赚的。</div></div>';
-  if(scope==="pre") h += '<div class="card" style="border:1px solid #f57c00"><div style="font-size:12px;color:#f57c00">📦 这部分是9/1之前的历史利润，需要在"历史结算"页确认提取。<button class="btn btn-sm btn-outline" style="margin-left:10px" onclick="nav(\'settlement\')">去结算</button></div></div>';
-  h += '<div class="btn-row"><button class="btn btn-outline" onclick="nav(\'home\')">← 返回首页</button></div>';
-  document.getElementById('mainContent').innerHTML = h;
-}
-
-// ══ 历史结算存档：与投资方合作分界（SETTLEMENT_CUTOFF = 2026-09-01）══
-// 9/1之前的利润归结算前所有，"确认提取"是一次性动作——点一次，把当时算出来的金额
-// 定格存档，此后系统日常视图（首页/利润表/现金流）永久只看9/1起的数据，不再两栏对比。
-function settlementRow(label,amount,color) {
-  return '<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px solid #f5f5f5"><span>'+label+'</span><span style="font-weight:600;color:'+color+'">'+formatMoney(amount)+'</span></div>';
-}
-function renderSettlement() {
-  var live = computeProfitBreakdown(isBeforeCutoff); // 实时重算的9/1前利润（如果之后又补录/改了老数据，可能和已提取的不一样）
-  var settleRecs = _financeRecords.filter(function(r){return r.type==="settlement";}).slice().sort(function(a,b){return (b.date||"").localeCompare(a.date||"");});
-  var extracted = settleRecs.length>0;
-  var extractedTotal = settleRecs.reduce(function(s,r){return s+r.amount;},0);
-  var mismatch = extracted && Math.abs(extractedTotal-live.netProfit)>0.01;
-
-  var h='';
-  h+='<div class="page-header"><div class="page-title">🧾 历史结算存档</div><div class="page-sub">与投资方合作分界日：'+SETTLEMENT_CUTOFF+'　·　此日期前的利润是提取前的，提取后系统日常数字只看'+SETTLEMENT_CUTOFF+'起的，不再两栏对比</div></div>';
-
-  h+='<div class="card" style="border:2px solid '+(extracted?'#2e7d32':'#f57c00')+';max-width:560px">';
-  if(!extracted) {
-    h+='<div class="card-title" style="margin-bottom:10px;color:#f57c00">📦 历史利润（'+SETTLEMENT_CUTOFF+' 之前，待提取）</div>';
-    h+=settlementRow('① 砍头息（按放款日期）', live.haircut, '#e65100');
-    h+=settlementRow('② 利息收入（按实收日期）', live.interestIncome, '#2e7d32');
-    h+=settlementRow('③ 其他收入', live.otherIncome, '#2e7d32');
-    h+=settlementRow('④ 运营支出', -live.expense, '#c62828');
-    h+='<div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:6px;border-top:2px solid #333;font-weight:700"><span>历史净利润</span><span style="color:'+(live.netProfit>=0?'#2e7d32':'#c62828')+'">'+formatMoney(live.netProfit)+'</span></div>';
-    h+='<div style="font-size:11px;color:var(--muted);margin-top:8px">本金回收（不算利润，仅供参考）：'+formatMoney(live.prinRecov)+'</div>';
-    if(isBoss()) {
-      h+='<div class="btn-row" style="margin-top:14px"><button class="btn btn-primary" onclick="recordSettlementExtraction()">✅ 确认提取历史利润</button></div>';
+function checkKeyPermission(role, key, newValue, currentData) {
+  const perm = (ROLE_PERMS[role] || {})[key];
+  if (!perm) return { ok: false, reason: `角色无权修改 ${key}` };
+  if (perm.add === true && perm.edit === true && perm.del === true) return { ok: true }; // 老板全权，跳过diff，省点计算
+  const oldArr = currentData[key] || [];
+  const { added, edited, removed } = diffById(oldArr, newValue);
+  if (removed.length > 0 && !perm.del) return { ok: false, reason: '无权删除记录' };
+  if (edited.length > 0 && !perm.edit) return { ok: false, reason: '无权修改已有记录' };
+  if (added.length > 0) {
+    if (perm.add === true) { /* 允许 */ }
+    else if (perm.add === 'acquired_sale_only') {
+      const bad = added.find(r => r.category !== '收购车辆销售利润');
+      if (bad) return { ok: false, reason: '业务员只能新增"收购车辆销售利润"这一类财务记录' };
     } else {
-      h+='<div style="font-size:12px;color:#f57c00;margin-top:14px">只有老板账号能确认提取</div>';
-    }
-    h+='<div style="font-size:11px;color:var(--muted);margin-top:8px">提取后金额会定格存档，不会因为以后补录/修改9/1前的旧数据而变化；提取后系统日常数字（首页/利润表/现金流）会永久只看'+SETTLEMENT_CUTOFF+'起的数据。</div>';
-  } else {
-    h+='<div class="card-title" style="margin-bottom:10px;color:#2e7d32">✅ 历史利润已提取</div>';
-    h+='<div style="display:flex;justify-content:space-between;padding:10px 0;font-size:22px;font-weight:700;color:#2e7d32"><span>已提取金额</span><span>'+formatMoney(extractedTotal)+'</span></div>';
-    h+='<div style="font-size:12px;color:var(--muted)">提取日期：'+formatDate(settleRecs[0].date)+'　·　这笔钱以后都和本系统无关，不会再滚入任何合作期核算</div>';
-    if(mismatch) {
-      h+='<div style="margin-top:12px;padding:10px;background:#fff3e0;border-radius:8px;font-size:12px;color:#e65100">⚠️ 当前用9/1前数据实时重算的结果是 '+formatMoney(live.netProfit)+'，和已提取的 '+formatMoney(extractedTotal)+' 不一致——说明提取之后又补录或修改了9/1前的旧记录，需要你确认一下这笔差额怎么处理（可以再手动记一笔补充提取，跟我说一声我来加）。</div>';
+      return { ok: false, reason: '无权新增记录' };
     }
   }
-  h+='<div class="btn-row" style="margin-top:14px"><button class="btn btn-outline" onclick="renderHaircutDetail(\'pre\')">✂️ 查看历史砍头息明细</button> <button class="btn btn-outline" onclick="renderInterestDetail(\'pre\')">💰 查看历史利息明细</button></div>';
-  h+='</div>';
-
-  if(settleRecs.length>0) {
-    h+='<div class="card" style="max-width:720px"><div class="card-title" style="margin-bottom:10px">📋 提取记录</div><div class="table-wrap"><table><thead><tr><th>提取确认日期</th><th>金额</th><th>说明</th></tr></thead><tbody>';
-    settleRecs.forEach(function(r){ h+='<tr><td>'+formatDate(r.date)+'</td><td style="font-weight:700;color:#f57c00">'+formatMoney(r.amount)+'</td><td style="font-size:12px;color:var(--muted)">'+(r.note||'')+'</td></tr>'; });
-    h+='</tbody></table></div></div>';
-  }
-
-  h+='<div class="btn-row"><button class="btn btn-outline" onclick="nav(\'home\')">← 返回首页</button></div>';
-  document.getElementById('mainContent').innerHTML = h;
+  return { ok: true };
 }
 
-async function recordSettlementExtraction() {
-  if(!isBoss()) { alert("⛔ 只有老板能确认提取历史利润"); return; }
-  var already = _financeRecords.some(function(r){return r.type==="settlement";});
-  if(already) { alert("历史利润已经提取过了，不能重复提取。如果9/1前的数据后来有改动，请告诉我如何处理差额。"); return; }
-  var pre = computeProfitBreakdown(isBeforeCutoff);
-  if(!confirm("确认提取 "+SETTLEMENT_CUTOFF+" 之前历史利润 "+formatMoney(pre.netProfit)+"？\n\n提取后这笔钱会定格存档，以后都和系统日常核算无关；首页/利润表/现金流会永久只看"+SETTLEMENT_CUTOFF+"起的数据，不可逆，请确认无误。")) return;
-  _financeRecords.unshift({
-    id: "SETTLE"+Date.now(),
-    type: "settlement",
-    amount: pre.netProfit,
-    category: "历史利润提取",
-    date: new Date().toISOString().slice(0,10),
-    loanId: "",
-    note: SETTLEMENT_CUTOFF+"前历史利润确认提取：砍头息"+formatMoney(pre.haircut)+" + 利息收入"+formatMoney(pre.interestIncome)+" + 其他收入"+formatMoney(pre.otherIncome)+" − 支出"+formatMoney(pre.expense)+" = "+formatMoney(pre.netProfit)+"（这笔钱以后都和系统无关）"
-  });
-  await saveFinance();
-  alert("✅ 已提取历史利润 "+formatMoney(pre.netProfit)+"，以后系统日常数字只看"+SETTLEMENT_CUTOFF+"起的数据");
-  renderSettlement();
-}
-
-function renderHome() {
-  var _lr = loanRecords();
-  var total = _lr.length;
-  var active = _lr.filter(function(l){return l.status==="active"}).length;
-  var overdue = _lr.filter(function(l){return l.status==="overdue"}).length;
-  var pending = _lr.filter(function(l){return l.status==="pending"}).length;
-  var closed = _lr.filter(function(l){return l.status==="closed"}).length;
-  var totalAmt = _lr.reduce(function(s,l){return s+l.amount},0);
-  var activeAmt = _lr.filter(function(l){return l.status!=="closed"}).reduce(function(s,l){return s+l.amount},0);
-  // ══ 与投资方合作分界（SETTLEMENT_CUTOFF）：首页日常数字全部只看合作期(9/1起)的，
-  // 历史利润是一次性提取动作，只作为一张"状态"卡片，不再摆两栏对比 ══
-  var postSettle = computeProfitBreakdown(isFromCutoff);
-  var totalInterestIncome = postSettle.interestIncome;
-  var totalHaircut = postSettle.haircut;
-  var totalOtherIncome = postSettle.otherIncome;
-  var totalPrinRecov = postSettle.prinRecov; // 本金回收不计入利润，只是资金回流
-  var totalExpense = postSettle.expense;
-  var profit = postSettle.netProfit;
-  var settleRecs = _financeRecords.filter(function(r){return r.type==="settlement";});
-  var historyExtracted = settleRecs.length>0;
-  var historyAmount = historyExtracted ? settleRecs.reduce(function(s,r){return s+r.amount;},0) : computeProfitBreakdown(isBeforeCutoff).netProfit;
-  var _aq = acquiredRecords();
-  var acqStock = _aq.filter(function(a){return a.status!=="sold";});
-  var acqStockCount = acqStock.length;
-  var acqStockCost = acqStock.reduce(function(s,a){return s+(a.amount||0);},0);
-
-  var h = "";
-  h += '<div class="page-header"><div class="page-title">🏠 系统首页</div><div class="page-sub">汽车抵押贷款业务 · 财务一体化管理平台 · 以下财务数字默认只统计 '+SETTLEMENT_CUTOFF+' 起（历史利润单独结算，见下方卡片）</div></div>';
-
-  h += '<div class="stats-grid">';
-  h += '<div class="stat-card blue"><div class="stat-icon">📄</div><div class="stat-label">合同总数</div><div class="stat-value">'+total+'</div><div class="stat-sub">笔贷款</div></div>';
-  h += '<div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-label">还款中</div><div class="stat-value">'+active+'</div><div class="stat-sub">笔</div></div>';
-  h += '<div class="stat-card amber"><div class="stat-icon">⏳</div><div class="stat-label">审核中</div><div class="stat-value">'+pending+'</div><div class="stat-sub">笔</div></div>';
-  h += '<div class="stat-card red"><div class="stat-icon">⚠️</div><div class="stat-label">已逾期</div><div class="stat-value">'+overdue+'</div><div class="stat-sub">笔</div></div>';
-  if(canViewFinance()) {
-    h += '<div class="stat-card purple" style="cursor:pointer" onclick="nav(\'interest_detail\')"><div class="stat-icon">💰</div><div class="stat-label">利息收入</div><div class="stat-value">'+formatMoney(totalInterestIncome)+'</div><div class="stat-sub">不含本金回收 · 点击查看明细</div></div>';
-    h += '<div class="stat-card amber" style="cursor:pointer" onclick="nav(\'haircut_detail\')"><div class="stat-icon">✂️</div><div class="stat-label">砍头息</div><div class="stat-value">'+formatMoney(totalHaircut)+'</div><div class="stat-sub">合同自动归集 · 点击查看明细</div></div>';
-    h += '<div class="stat-card blue" style="cursor:pointer" onclick="nav(\'finance_expense\')"><div class="stat-icon">💸</div><div class="stat-label">运营支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div><div class="stat-sub">点击查看明细</div></div>';
-    h += '<div class="stat-card green" style="cursor:pointer" onclick="nav(\'profit_detail\')"><div class="stat-icon">📈</div><div class="stat-label">净利润</div><div class="stat-value">'+formatMoney(profit)+'</div><div class="stat-sub">'+(profit>=0?'盈利':'亏损')+' · 点击查看计算过程</div></div>';
-    h += '<div class="stat-card '+(historyExtracted?'blue':'amber')+'" style="cursor:pointer" onclick="nav(\'settlement\')"><div class="stat-icon">'+(historyExtracted?'✅':'📦')+'</div><div class="stat-label">历史利润（'+SETTLEMENT_CUTOFF+' 前）</div><div class="stat-value">'+formatMoney(historyAmount)+'</div><div class="stat-sub">'+(historyExtracted?'已提取，与本系统无关':'待提取 · 点击去结算')+'</div></div>';
-  }
-  h += '<div class="stat-card amber"><div class="stat-icon">🏦</div><div class="stat-label">在贷余额</div><div class="stat-value">'+formatMoney(activeAmt)+'</div><div class="stat-sub">未结清</div></div>';
-  h += '<div class="stat-card purple" style="cursor:pointer" onclick="nav(\'acquired_list\')"><div class="stat-icon">🚙</div><div class="stat-label">收购车辆库存</div><div class="stat-value">'+formatMoney(acqStockCost)+'</div><div class="stat-sub">'+acqStockCount+'台库存中 · 点击查看</div></div>';
-  h += "</div>";
-
-  h += '<div class="card"><div class="card-header"><div class="card-title">🚀 快速入口</div></div><div class="home-grid">';
-  if(canWriteLoans()) h += '<div class="home-card" onclick="nav(\'add\')"><div class="icon">➕</div><div class="label">新增贷款</div><div class="sublabel">录入新合同</div></div>';
-  h += '<div class="home-card" onclick="nav(\'list\')"><div class="icon">📋</div><div class="label">贷款列表</div><div class="sublabel">查询/编辑</div></div>';
-  if(canAddFinance()) {
-    h += '<div class="home-card" onclick="nav(\'finance_income\')"><div class="icon">💵</div><div class="label">收入登记</div><div class="sublabel">记录收款</div></div>';
-    h += '<div class="home-card" onclick="nav(\'finance_expense\')"><div class="icon">💸</div><div class="label">支出登记</div><div class="sublabel">记录开支</div></div>';
-  }
-  if(canViewFinance()) h += '<div class="home-card" onclick="nav(\'finance_pnl\')"><div class="icon">📊</div><div class="label">利润表</div><div class="sublabel">财务分析</div></div>';
-  if(isBoss()) h += '<div class="home-card" onclick="doBackup()" style="border:2px solid #2e7d32"><div class="icon">💾</div><div class="label">备份数据</div><div class="sublabel">下载3个文件</div></div>';
-  h += "</div></div>";
-
-  h += '<div class="card"><div class="card-header"><div class="card-title">📋 最近贷款记录</div></div>';
-  if(_lr.length===0) { h += '<div style="text-align:center;padding:40px;color:var(--muted)">暂无记录</div>'; }
-  else {
-    h += '<div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>车牌</th><th>金额</th><th>状态</th><th>放款日</th></tr></thead><tbody>';
-    var recent = _lr.slice(-5).reverse();
-    for(var i=0;i<recent.length;i++) {
-      var l = recent[i];
-      h += '<tr><td style="font-weight:600;color:var(--sky)">'+l.id+'</td><td>'+l.name+'</td><td>'+l.plate+'</td><td>'+formatMoney(l.amount)+'</td><td>'+statusHtml(l.status)+'</td><td>'+formatDate(l.date)+'</td></tr>';
-    }
-    h += "</tbody></table></div>";
-  }
-  h += "</div>";
-  document.getElementById("mainContent").innerHTML = h;
-}
-
-function calcPreview() {
-  var amount = parseFloat(document.getElementById("f_amount")?.value)||0;
-  var rate   = parseFloat(document.getElementById("f_rate")?.value)||0;
-  var term   = parseInt(document.getElementById("f_term")?.value)||1;
-  var repay  = document.getElementById("f_repay")?.value||"等额本息";
-  var box    = document.getElementById("calcPreviewBox"); if(!box) return;
-  // ══ 双向联动：先算砍头/实际放款，再判断是否显示预览 ══
-  var actEl = document.getElementById("f_actual_amount");
-  var hcEl  = document.getElementById("f_haircut");
-  var haircut, actual;
-  if(window._lastEdit === "actual" && actEl && actEl.value !== "" && amount > 0) {
-    actual  = parseFloat(actEl.value) || 0;
-    haircut = actual > 0 ? Math.round((1 - actual/amount)*10000)/100 : 0;
-    if(hcEl) hcEl.value = haircut.toFixed(2);
-  } else {
-    haircut = parseFloat(hcEl?.value) || 0;
-    actual  = Math.round(amount * (1 - haircut/100) * 100) / 100;
-    if(actEl && amount > 0) actEl.value = actual || "";
-  }
-  if(!amount || !rate) { box.style.display="none"; return; }
-  var res = calcRepay(amount, rate, term, repay, haircut);
-  res.actual = actual;
-  // 渲染预览
-  var modeLabel = repay==="永续贷"?"每月利息":repay==="先息后本"?"每月利息（最后一期还本）":"每月还款（本+息）";
-  var scheduleRows = "";
-  for(var i=0;i<res.schedule.length;i++) {
-    var s = res.schedule[i];
-    scheduleRows += "<tr><td>第"+s.period+"期</td><td>$"+s.principal.toFixed(2)+"</td><td>$"+s.interest.toFixed(2)+"</td><td style=\"font-weight:600\">$"+s.total.toFixed(2)+"</td></tr>";
-  }
-  var haircutAmt = Math.round((amount-res.actual)*100)/100;
-  var comprehensive = Math.round((haircutAmt+res.totalInterest)*100)/100;
-  var comprehensivePct = res.actual ? Math.round(comprehensive/res.actual*10000)/100 : 0;
-  box.style.display="block";
-  box.innerHTML =
-    "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px\">" +
-    "<div style=\"background:#e3f2fd;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">实际放款</div><div style=\"font-size:18px;font-weight:700;color:#1565c0\">$"+res.actual.toFixed(2)+"</div></div>" +
-    "<div style=\"background:#e8f5e9;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">"+modeLabel+"</div><div style=\"font-size:18px;font-weight:700;color:#2e7d32\">$"+res.monthly.toFixed(2)+"</div></div>" +
-    "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">总利息（不含砍头）</div><div style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+res.totalInterest.toFixed(2)+"</div></div>" +
-    "<div style=\"background:#fce4ec;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">应总还款</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">$"+res.totalRepay.toFixed(2)+"</div></div>" +
-    "<div style=\"background:#f3e5f5;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">砍头息</div><div style=\"font-size:18px;font-weight:700;color:#8e24aa\">$"+haircutAmt.toFixed(2)+"</div></div>" +
-    "<div style=\"background:#ffebee;border-radius:8px;padding:10px;text-align:center;border:1.5px solid #ef9a9a\"><div style=\"font-size:11px;color:#546e7a\">🧮 综合利息（砍头+总利息）</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">$"+comprehensive.toFixed(2)+"</div><div style=\"font-size:10px;color:#546e7a\">占实际放款 "+comprehensivePct+"%</div></div>" +
-    "</div>" +
-    "<div style=\"overflow-x:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><thead><tr style=\"background:#f5f5f5\"><th style=\"padding:6px 8px;text-align:left\">期数</th><th style=\"padding:6px 8px;text-align:left\">本金</th><th style=\"padding:6px 8px;text-align:left\">利息</th><th style=\"padding:6px 8px;text-align:left\">合计</th></tr></thead><tbody>" +
-    scheduleRows + "</tbody></table></div>";
-}
-
-function renderAddForm(data) {
-  var isEdit = !!data;
-  var d = data || {};
-  var h = "";
-  h += "<div class=\"page-header\"><div class=\"page-title\">"+(isEdit?"✏️ ":"➕ ")+(isEdit?"编辑贷款":"新增贷款")+"</div><div class=\"page-sub\">"+(isEdit?"修改贷款信息":"录入新的汽车抵押贷款合同")+"</div></div>";
-  // 客户信息
-  h += "<div class=\"card\"><div class=\"card-title\" style=\"margin-bottom:12px\">👤 客户信息</div><div class=\"form-grid\">";
-  h += "<div class=\"form-group\"><label>客户姓名 *</label><input type=\"text\" id=\"f_name\" value=\""+(d.name||"")+"\" placeholder=\"请输入姓名\"></div>";
-  h += "<div class=\"form-group\"><label>手机号 *</label><input type=\"text\" id=\"f_phone\" value=\""+(d.phone||"")+"\" placeholder=\"请输入手机号\"></div>";
-  h += "<div class=\"form-group\"><label>身份证号</label><input type=\"text\" id=\"f_idcard\" value=\""+(d.idcard||"")+"\" placeholder=\"可选\"></div>";
-  h += "</div></div>";
-  // 车辆信息
-  h += "<div class=\"card\"><div class=\"card-title\" style=\"margin-bottom:12px\">🚗 车辆信息</div><div class=\"form-grid\">";
-  h += "<div class=\"form-group\"><label>车牌号 *</label><input type=\"text\" id=\"f_plate\" value=\""+(d.plate||"")+"\" placeholder=\"如：2AB-1234\"></div>";
-  h += "<div class=\"form-group\"><label>车辆品牌</label><input type=\"text\" id=\"f_brand\" value=\""+(d.brand||"")+"\" placeholder=\"如：Toyota\"></div>";
-  h += "<div class=\"form-group\"><label>车辆型号</label><input type=\"text\" id=\"f_model\" value=\""+(d.model||"")+"\" placeholder=\"如：Prius 2022\"></div>";
-  h += "<div class=\"form-group\"><label>车辆颜色</label><input type=\"text\" id=\"f_color\" value=\""+(d.color||"")+"\" placeholder=\"如：白色\"></div>";
-  h += "<div class=\"form-group\"><label>评估价值（$）</label><input type=\"number\" id=\"f_estimate\" value=\""+(d.estimate||"")+"\" placeholder=\"0\" step=\"0.01\"></div>";
-  h += "</div></div>";
-  // 贷款设置 + 实时计算
-  h += "<div class=\"card\"><div class=\"card-title\" style=\"margin-bottom:12px\">💰 贷款设置</div><div class=\"form-grid\">";
-  h += "<div class=\"form-group\"><label>贷款金额（$）*</label><input type=\"number\" id=\"f_amount\" value=\""+(d.amount||"")+"\" placeholder=\"0\" min=\"0\" oninput=\"calcPreview()\"></div>";
-  h += "<div class=\"form-group\"><label>砍头比例（%）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">实际放款 = 贷款×(1−砍头%)</span></label><input type=\"number\" id=\"f_haircut\" value=\""+(d.haircut!==undefined?d.haircut:"9.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"window._lastEdit='haircut';calcPreview()\"></div>";
-  h += "<div class=\"form-group\"><label>实际放款（$）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">可手动覆盖</span></label><input type=\"number\" id=\"f_actual_amount\" value=\""+(d.actualAmount||"")+"\" placeholder=\"自动计算\" min=\"0\" style=\"border-color:#2e7d32\" oninput=\"window._lastEdit='actual';calcPreview()\"></div>";
-  h += "<div class=\"form-group\"><label>月利率（%）</label><input type=\"number\" id=\"f_rate\" value=\""+(d.rate!==undefined?d.rate:"1.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"window._lastEdit='haircut';calcPreview()\"></div>";
-  h += "<div class=\"form-group\"><label>贷款期限</label><select id=\"f_term\" onchange=\"calcPreview()\">";
-  [1,2,3,4,5,6,9,12,18,24,36].forEach(function(v){ h += "<option value=\""+v+"\""+((d.term==v||(v==3&&!d.term))?" selected":"")+">"+v+"期</option>"; });
-  h += "</select></div>";
-  h += "<div class=\"form-group\"><label>还款方式</label><select id=\"f_repay\" onchange=\"calcPreview()\">";
-  ["先息后本","等额本息","永续贷"].forEach(function(v){ h += "<option value=\""+v+"\""+((d.repay===v||(v==="先息后本"&&!d.repay))?" selected":"")+">"+v+"</option>"; });
-  h += "</select></div>";
-  h += "<div class=\"form-group\"><label>状态</label><select id=\"f_status\">";
-  [{v:"pending",l:"审核中"},{v:"active",l:"还款中"},{v:"overdue",l:"已逾期"},{v:"closed",l:"已结清"}].forEach(function(o){ h += "<option value=\""+o.v+"\""+((d.status===o.v||(o.v==="pending"&&!d.status))?" selected":"")+">"+o.l+"</option>"; });
-  h += "</select></div>";
-  h += "<div class=\"form-group\"><label>放款日期</label><input type=\"date\" id=\"f_date\" value=\""+(d.date||new Date().toISOString().slice(0,10))+"\" ></div>";
-  h += "<div class=\"form-group span3\"><label>备注</label><textarea id=\"f_note\" placeholder=\"其他需要记录的信息...\">"+(d.note||"")+"</textarea></div>";
-  h += "</div>";
-  // 实时预览区
-  h += "<div id=\"calcPreviewBox\" style=\"display:none;margin-top:14px;padding:14px;background:#f8f9fa;border-radius:10px;border:1px solid #e0e0e0\"><div style=\"font-size:12px;font-weight:700;color:var(--navy);margin-bottom:10px\">📊 还款计划预览</div></div>";
-  h += "</div>";
-  h += "<div class=\"btn-row\"><button class=\"btn btn-primary\" onclick=\"saveLoan()\">✅ 保存合同</button>";
-  h += "<button class=\"btn btn-outline\" onclick=\"nav(\'list\')\" >📋 查看列表</button>";
-  if(isEdit) h += "<button class=\"btn btn-outline\" onclick=\"nav(\'list\')\" >取消</button>";
-  h += "</div>";
-  document.getElementById("mainContent").innerHTML = h;
-  // 绑定手动覆盖检测
-  window._lastEdit = d.actualAmount ? "actual" : "haircut";
-  // 编辑已有合同且带有真实还款记录时，先展示真实数据，不要用公式覆盖；
-  // 一旦用户改动金额/利率/期数/方式等字段，会自动切回理论计算器（calcPreview）
-  if(isEdit && d.schedule && d.schedule.length) {
-    setTimeout(function(){ renderActualSchedule(d); }, 50);
-  } else {
-    setTimeout(calcPreview, 50);
-  }
-}
-
-// 展示合同已保存的真实还款记录（导入/历史数据），与"理论计算器"区分开，
-// 避免误把calcRepay()现算的等额本息公式当成真实还款金额
-function renderActualSchedule(d) {
-  var box = document.getElementById("calcPreviewBox"); if(!box) return;
-  var rows = "";
-  var sch = d.schedule || [];
-  for(var i=0;i<sch.length;i++) {
-    var s = sch[i];
-    rows += "<tr><td>第"+s.period+"期</td><td>$"+Number(s.principal||0).toFixed(2)+"</td><td>$"+Number(s.interest||0).toFixed(2)+"</td><td style=\"font-weight:600\">$"+Number(s.total||0).toFixed(2)+"</td></tr>";
-  }
-  var haircutAmt = loanHaircutAmount(d);
-  var comprehensive = loanComprehensiveInterest(d);
-  var comprehensivePct = loanComprehensiveInterestPct(d);
-  box.style.display = "block";
-  box.innerHTML =
-    "<div style=\"font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px\">📋 实际还款记录（合同已保存数据，非公式计算）</div>" +
-    "<div style=\"font-size:11px;color:var(--muted);margin-bottom:10px\">以下为该合同保存的真实数据。若修改上方金额/利率/期数/还款方式等字段，将自动切换为理论等额本息计算器（仅供参考，不代表实际还款）。</div>" +
-    "<div style=\"display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px\">" +
-    "<div style=\"background:#e3f2fd;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">实际放款</div><div style=\"font-size:18px;font-weight:700;color:#1565c0\">$"+Number(d.actualAmount||0).toFixed(2)+"</div></div>" +
-    "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">总利息（不含砍头）</div><div style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+Number(d.totalInterest||0).toFixed(2)+"</div></div>" +
-    "<div style=\"background:#f3e5f5;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">砍头息</div><div style=\"font-size:18px;font-weight:700;color:#8e24aa\">$"+haircutAmt.toFixed(2)+"</div></div>" +
-    "<div style=\"background:#ffebee;border-radius:8px;padding:10px;text-align:center;border:1.5px solid #ef9a9a\"><div style=\"font-size:11px;color:#546e7a\">🧮 综合利息（砍头+总利息）</div><div style=\"font-size:18px;font-weight:700;color:#c62828\">$"+comprehensive.toFixed(2)+"</div><div style=\"font-size:10px;color:#546e7a\">占实际放款 "+comprehensivePct+"%</div></div>" +
-    "</div>" +
-    "<div style=\"overflow-x:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><thead><tr style=\"background:#f5f5f5\"><th style=\"padding:6px 8px;text-align:left\">期数</th><th style=\"padding:6px 8px;text-align:left\">本金</th><th style=\"padding:6px 8px;text-align:left\">利息</th><th style=\"padding:6px 8px;text-align:left\">合计</th></tr></thead><tbody>" +
-    rows + "</tbody></table></div>";
-}
-
-async function saveLoan() {
-  var name = document.getElementById("f_name")?.value.trim();
-  var phone = document.getElementById("f_phone")?.value.trim();
-  var plate = document.getElementById("f_plate")?.value.trim();
-  var amount = parseFloat(document.getElementById("f_amount")?.value);
-  if(!name) { alert("请输入客户姓名"); return; }
-  if(!phone) { alert("请输入手机号"); return; }
-  if(!plate) { alert("请输入车牌号"); return; }
-  if(!amount || amount<=0) { alert("请输入有效的贷款金额"); return; }
-  var haircut = parseFloat(document.getElementById("f_haircut")?.value)||0;
-  var repay = document.getElementById("f_repay")?.value||"先息后本";
-  var rate = parseFloat(document.getElementById("f_rate")?.value)||0;
-  var term = parseInt(document.getElementById("f_term")?.value)||3;
-  var res = calcRepay(amount, rate, term, repay, haircut);
-  var actualAmountEl = document.getElementById("f_actual_amount");
-  var actualAmount = parseFloat(actualAmountEl?.value)||res.actual;
-  var data = {
-    name:name, phone:phone, plate:plate,
-    idcard:document.getElementById("f_idcard")?.value.trim()||"",
-    brand:document.getElementById("f_brand")?.value.trim()||"",
-    color:document.getElementById("f_color")?.value.trim()||"",
-    model:document.getElementById("f_model")?.value.trim()||"",
-    estimate:parseFloat(document.getElementById("f_estimate")?.value)||0,
-    amount:amount,
-    actualAmount:actualAmount,
-    haircut:haircut,
-    rate:rate,
-    term:term,
-    repay:repay,
-    monthly:res.monthly,
-    totalRepay:res.totalRepay,
-    totalInterest:res.totalInterest,
-    schedule:res.schedule,
-    status:document.getElementById("f_status")?.value||"pending",
-    date:document.getElementById("f_date")?.value||new Date().toISOString().slice(0,10),
-    note:document.getElementById("f_note")?.value.trim()||""
+function getInitData() {
+  return {
+    car_loans: [],
+    car_finance: [],
+    car_nextId: 1
   };
-  if(_editId) {
-    for(var i=0;i<_loans.length;i++) { if(_loans[i].id===_editId) { for(var k in data) _loans[i][k]=data[k]; break; } }
-    alert("✅ 贷款信息已更新");
-  } else {
-    data.id = genId();
-    _loans.unshift(data);
-    alert("✅ 新增贷款成功 编号："+data.id);
-  }
-  saveLoans(); _editId=null; nav("list");
 }
 
-
-
-function renderList() {
-  var _lr = loanRecords();
-  var active  = _lr.filter(function(l){return l.status==='active';}).length;
-  var overdue = _lr.filter(function(l){return l.status==='overdue';}).length;
-  var closed  = _lr.filter(function(l){return l.status==='closed';}).length;
-  var pending = _lr.filter(function(l){return l.status==='pending';}).length;
-  var h='';
-  h+='<div class="page-header"><div class="page-title">🚗 贷款查询</div><div class="page-sub">共 '+_lr.length+' 笔合同</div></div>';
-  // 统计栏
-  h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">';
-  h+='<div style="background:#e8f5e9;border-radius:10px;padding:10px 12px;cursor:pointer;border:2px solid transparent" onclick="setStatusFilter(\'active\')" id="sc_active"><div style="font-size:18px;font-weight:700;color:#2e7d32">'+active+'</div><div style="font-size:11px;color:#546e7a">还款中</div></div>';
-  h+='<div style="background:#ffebee;border-radius:10px;padding:10px 12px;cursor:pointer;border:2px solid transparent" onclick="setStatusFilter(\'overdue\')" id="sc_overdue"><div style="font-size:18px;font-weight:700;color:#c62828">'+overdue+'</div><div style="font-size:11px;color:#546e7a">已逾期</div></div>';
-  h+='<div style="background:#fff3e0;border-radius:10px;padding:10px 12px;cursor:pointer;border:2px solid transparent" onclick="setStatusFilter(\'pending\')" id="sc_pending"><div style="font-size:18px;font-weight:700;color:#f57c00">'+pending+'</div><div style="font-size:11px;color:#546e7a">审核中</div></div>';
-  h+='<div style="background:#f5f5f5;border-radius:10px;padding:10px 12px;cursor:pointer;border:2px solid transparent" onclick="setStatusFilter(\'closed\')" id="sc_closed"><div style="font-size:18px;font-weight:700;color:#9e9e9e">'+closed+'</div><div style="font-size:11px;color:#546e7a">已结清</div></div>';
-  h+='</div>';
-  // 搜索栏
-  h+='<div class="search-row">';
-  h+='<input type="text" id="searchInput" placeholder="搜索客户/合同号/车牌/手机..." oninput="filterList()" style="flex:2">';
-  h+='<select id="monthFilter" onchange="filterList()"><option value="">全部月份</option>'+getMonthOptions()+'</select>';
-  h+='<select id="statusFilter" onchange="filterList();updateStatCards()"><option value="">全部状态</option><option value="active">还款中</option><option value="overdue">已逾期</option><option value="pending">审核中</option><option value="closed">已结清</option></select>';
-  h+='<select id="repayFilter" onchange="filterList()"><option value="">全部方式</option><option value="先息后本">先息后本</option><option value="等额本息">等额本息</option><option value="永续贷">永续贷</option></select>';
-  h+='<button class="btn btn-success" onclick="nav(\'add\')">➕ 新增</button>';
-  h+='</div>';
-  h+='<div id="listResult"></div>';
-  document.getElementById('mainContent').innerHTML = h;
-  filterList();
+async function loadData() {
+  const { data, error } = await supabase.from('pawndata').select('key, value')
+    .in('key', ['car_loans', 'car_finance', 'car_nextId']);
+  if (error) throw new Error('DB_READ_ERROR: ' + error.message);
+  const result = {};
+  if (data) data.forEach(row => { result[row.key] = row.value; });
+  const init = getInitData();
+  Object.keys(init).forEach(k => { if (result[k] === undefined) result[k] = init[k]; });
+  return result;
 }
 
-function getMonthOptions() {
-  var months={};
-  loanRecords().forEach(function(l){if(l.date)months[l.date.slice(0,7)]=1;});
-  var arr=Object.keys(months).sort().reverse();
-  return arr.map(function(m){return '<option value="'+m+'">'+m+'</option>';}).join('');
-}
-
-function setStatusFilter(val) {
-  var el=document.getElementById('statusFilter'); if(!el) return;
-  el.value = el.value===val ? '' : val;
-  filterList(); updateStatCards();
-}
-
-function updateStatCards() {
-  var sel=document.getElementById('statusFilter')?.value||'';
-  ['active','overdue','pending','closed'].forEach(function(s){
-    var el=document.getElementById('sc_'+s); if(!el) return;
-    el.style.borderColor = sel===s ? 'var(--navy)' : 'transparent';
-  });
-}
-
-
-function toggleMonth(mk) {
-  _collapsedMonths[mk] = !_collapsedMonths[mk];
-  var body = document.getElementById('mg_'+mk);
-  var arrow = document.getElementById('ma_'+mk);
-  if(body) body.style.display = _collapsedMonths[mk] ? 'none' : '';
-  if(arrow) arrow.textContent = _collapsedMonths[mk] ? '▶' : '▼';
-}
-
-function filterList() {
-  var mobile=window.innerWidth<=768;
-  var q=(document.getElementById('searchInput')?.value||'').trim().toLowerCase();
-  var s=document.getElementById('statusFilter')?.value||'';
-  var m=document.getElementById('monthFilter')?.value||'';
-  var rp=document.getElementById('repayFilter')?.value||'';
-  var filtered=loanRecords().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
-  if(q) filtered=filtered.filter(function(l){return (l.name||'').toLowerCase().indexOf(q)>=0||(l.phone||'').indexOf(q)>=0||(l.plate||'').toLowerCase().indexOf(q)>=0||(l.id||'').toLowerCase().indexOf(q)>=0;});
-  if(s) filtered=filtered.filter(function(l){return l.status===s;});
-  if(m) filtered=filtered.filter(function(l){return l.date&&l.date.slice(0,7)===m;});
-  if(rp) filtered=filtered.filter(function(l){return (l.repay||'等额本息')===rp;});
-  var result=document.getElementById('listResult'); if(!result) return;
-  if(filtered.length===0){result.innerHTML='<div style="text-align:center;padding:48px;color:var(--muted)">暂无匹配记录</div>';return;}
-  // 总金额统计
-  var totalAmt=filtered.reduce(function(s,l){return s+l.amount;},0);
-  var totalMon=filtered.reduce(function(s,l){return s+(l.monthly||0);},0);
-  result.innerHTML='<div style="font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;gap:16px">'+
-    '<span>共 <b>'+filtered.length+'</b> 笔</span>'+
-    '<span>贷款合计 <b style="color:#1565c0">$'+totalAmt.toLocaleString()+'</b></span>'+
-    '<span>月利息合计 <b style="color:#2e7d32">$'+totalMon.toLocaleString()+'</b></span>'+
-    '</div>';
-  if(mobile) {
-    // ══ 手机：按月分组卡片 ══
-    var groups={}; filtered.forEach(function(l){var mk=(l.date||'').slice(0,7)||'未知';if(!groups[mk])groups[mk]=[];groups[mk].push(l);});
-    var mkeys=Object.keys(groups).sort().reverse();
-    var h='';
-    mkeys.forEach(function(mk){
-      var gloans=groups[mk];
-      var gamt=gloans.reduce(function(s,l){return s+l.amount;},0);
-      var isCollapsed = !!_collapsedMonths[mk];
-      h+='<div onclick="toggleMonth(\''+mk+'\')" style="display:flex;justify-content:space-between;align-items:center;padding:10px 8px;margin:12px 0 0;background:var(--navy);border-radius:8px;color:#fff;cursor:pointer">';
-      h+='<span style="font-weight:700;font-size:13px"><span id="ma_'+mk+'">'+(isCollapsed?'▶':'▼')+'</span> 📅 '+mk+'</span>';
-      h+='<span style="font-size:12px;opacity:.8">'+gloans.length+'笔 · $'+gamt.toLocaleString()+'</span></div>';
-      h+='<div id="mg_'+mk+'" style="display:'+(isCollapsed?'none':'')+';">';
-      gloans.forEach(function(l){
-        var sc=l.status==='overdue'?'overdue':l.status==='closed'?'closed':l.status==='pending'?'pending':'';
-        h+='<div class="loan-card '+sc+'">';
-        h+='<div class="loan-card-top"><div><div class="loan-card-name">'+l.name+'</div><div class="loan-card-meta">'+l.id+' · '+formatDate(l.date)+'</div></div>'+statusHtml(l.status)+'</div>';
-        h+='<div class="loan-card-row"><span class="loan-card-lbl">🚗 车牌</span><span class="loan-card-val">'+l.plate+(l.brand?' · '+l.brand:'')+'</span></div>';
-        h+='<div class="loan-card-row"><span class="loan-card-lbl">📱 手机</span><span class="loan-card-val">'+l.phone+'</span></div>';
-        h+='<div class="loan-card-row"><span class="loan-card-lbl">💰 贷款金额</span><span class="loan-card-val" style="color:var(--sky)">'+formatMoney(l.amount)+'</span></div>';
-        h+='<div class="loan-card-row"><span class="loan-card-lbl">💵 月利息</span><span class="loan-card-val">$'+(l.monthly||0).toFixed(2)+' · '+(l.repay||'等额本息')+'</span></div>';
-        h+='<div class="loan-card-row"><span class="loan-card-lbl">📋 砍头%</span><span class="loan-card-val">'+(l.haircut||0)+'% · 实放$'+(l.actualAmount||0).toLocaleString()+'</span></div>';
-        h+='<div class="loan-card-row"><span class="loan-card-lbl">🧮 综合利息</span><span class="loan-card-val" style="color:#c62828;font-weight:700">$'+loanComprehensiveInterest(l).toFixed(2)+' · 占实放'+loanComprehensiveInterestPct(l)+'%</span></div>';
-        h+='<div class="loan-card-btns">'+(canWriteLoans()?'<button class="btn btn-primary" onclick="editLoan(\''+l.id+'\')">✏️ 编辑</button>':'')+(canDelete()?'<button class="btn btn-danger" onclick="deleteLoan(\''+l.id+'\')">🗑 删除</button>':'')+'</div>';
-        h+='</div>';
-      });
-      h+='</div>';
-    });
-    result.innerHTML+=h;
-  } else {
-    // ══ 桌面：按月分组表格 ══
-    var groups={}; filtered.forEach(function(l){var mk=(l.date||'').slice(0,7)||'未知';if(!groups[mk])groups[mk]=[];groups[mk].push(l);});
-    var mkeys=Object.keys(groups).sort().reverse();
-    var h='';
-    mkeys.forEach(function(mk){
-      var gloans=groups[mk];
-      var gamt=gloans.reduce(function(s,l){return s+l.amount;},0);
-      var gmon=gloans.reduce(function(s,l){return s+(l.monthly||0);},0);
-      var isCollapsed = !!_collapsedMonths[mk];
-      h+='<div onclick="toggleMonth(\''+mk+'\')" style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;margin:14px 0 0;background:var(--navy);border-radius:'+(isCollapsed?'8px':'8px 8px 0 0')+';color:#fff;cursor:pointer;user-select:none">';
-      h+='<span style="font-weight:700;font-size:13px"><span id="ma_'+mk+'">'+(isCollapsed?'▶':'▼')+'</span> 📅 '+mk+'</span>';
-      h+='<span style="font-size:12px;opacity:.8">'+gloans.length+'笔 · 贷款$'+gamt.toLocaleString()+' · 月息$'+gmon.toFixed(0)+'</span></div>';
-      h+='<div id="mg_'+mk+'" style="display:'+(isCollapsed?'none':'')+';margin-bottom:10px"><div class="card" style="padding:0;overflow:hidden;border-radius:0 0 8px 8px"><div class="table-wrap"><table><thead><tr>';
-      h+='<th>#</th><th>客户姓名</th><th>手机号</th><th>车牌 / 品牌</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>月利率%</th><th>月利息</th><th>综合利息</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th>';
-      h+='</tr></thead><tbody>';
-      gloans.forEach(function(l){
-        var sc=l.status==='overdue'?'#ffebee':l.status==='closed'?'#fafafa':l.status==='pending'?'#fff8e1':'';
-        h+='<tr style="background:'+sc+'">';
-        h+='<td style="font-weight:700;color:var(--sky);font-size:12px;white-space:nowrap">'+l.id+'</td>';
-        h+='<td style="font-weight:600;color:var(--navy)">'+l.name+'</td>';
-        h+='<td style="font-size:12px">'+l.phone+'</td>';
-        h+='<td><div style="font-weight:600">'+l.plate+'</div><div style="font-size:11px;color:var(--muted)">'+(l.brand||'')+(l.color?' · '+l.color:'')+'</div></td>';
-        h+='<td style="font-weight:700;color:#1565c0">'+formatMoney(l.amount)+'</td>';
-        h+='<td style="color:#2e7d32">'+formatMoney(l.actualAmount||0)+'</td>';
-        h+='<td style="color:#f57c00">'+(l.haircut||0)+'%</td>';
-        h+='<td style="color:#c62828">'+(l.rate||0)+'%</td>';
-        h+='<td style="font-weight:600;color:#2e7d32">$'+(l.monthly||0).toFixed(2)+'</td>';
-        h+='<td style="font-weight:700;color:#c62828;white-space:nowrap">$'+loanComprehensiveInterest(l).toFixed(2)+'<div style="font-size:10px;color:var(--muted);font-weight:400">占实放'+loanComprehensiveInterestPct(l)+'%</div></td>';
-        h+='<td><span style="font-size:11px;background:#e3f2fd;color:#1565c0;padding:2px 7px;border-radius:10px;white-space:nowrap">'+(l.repay||'等额本息')+'</span></td>';
-        h+='<td>'+statusHtml(l.status)+'</td>';
-        h+='<td style="font-size:11px;color:var(--muted);white-space:nowrap">'+formatDate(l.date)+'</td>';
-        h+='<td style="white-space:nowrap">'+(canWriteLoans()?'<button class="btn btn-sm btn-primary" onclick="editLoan(\''+l.id+'\')">✏️ 编辑</button> ':'')+(canDelete()?'<button class="btn btn-sm btn-danger" onclick="deleteLoan(\''+l.id+'\')">删除</button>':(canWriteLoans()?'':'<span style="color:var(--muted);font-size:12px">只读</span>'))+'</td>';
-        h+='</tr>';
-      });
-      h+='</tbody></table></div></div></div>';
-    });
-    result.innerHTML+=h;
-  }
-}
-
-function editLoan(id) {
-  if(!canWriteLoans()) { alert("⛔ 你的账号没有编辑权限"); return; }
-  for(var i=0;i<_loans.length;i++) { if(_loans[i].id===id) { _editId=id; renderAddForm(_loans[i]); return; } }
-}
-
-async function deleteLoan(id) {
-  if(!canDelete()) { alert("⛔ 只有老板账号能删除"); return; }
-  if(!confirm("确定删除编号 "+id+" 的记录？")) return;
-  _loans = _loans.filter(function(l){ return l.id!==id; });
-  saveLoans(); filterList();
-}
-
-// ══════════════════════════════════════════════
-// ══ 收购车辆模块（公司收购/买断持有，等待转卖，非抵押贷款）══
-// 与"贷款列表"完全分开展示；未售出前不计算任何利润，
-// 售出后自动生成一笔"其他收入"财务记录，自动汇入净利润。
-// ══════════════════════════════════════════════
-var _editAcquiredId = null;
-
-function renderAcquiredList() {
-  var list = acquiredRecords().slice().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
-  var stock = list.filter(function(a){return a.status!=='sold';});
-  var sold  = list.filter(function(a){return a.status==='sold';});
-  var stockCost = stock.reduce(function(s,a){return s+(a.amount||0);},0);
-  var soldProfit = sold.reduce(function(s,a){var p=acquiredProfit(a);return s+(p||0);},0);
-  var h='';
-  h+='<div class="page-header"><div class="page-title">🚙 收购车辆</div><div class="page-sub">公司收购/买断持有的车辆库存 · 与抵押贷款分开管理，未售出前不计入利润</div></div>';
-  h+='<div class="stats-grid" style="margin-bottom:14px">';
-  h+='<div class="stat-card amber"><div class="stat-icon">📦</div><div class="stat-label">库存中</div><div class="stat-value">'+stock.length+'</div><div class="stat-sub">台</div></div>';
-  h+='<div class="stat-card blue"><div class="stat-icon">💰</div><div class="stat-label">库存成本合计</div><div class="stat-value" style="font-size:18px">'+formatMoney(stockCost)+'</div><div class="stat-sub">采购成本，未售出不算利润</div></div>';
-  h+='<div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-label">已售出</div><div class="stat-value">'+sold.length+'</div><div class="stat-sub">台</div></div>';
-  h+='<div class="stat-card green"><div class="stat-icon">📈</div><div class="stat-label">已实现利润</div><div class="stat-value" style="font-size:18px">'+formatMoney(soldProfit)+'</div><div class="stat-sub">成交价−采购成本，已计入净利润</div></div>';
-  h+='</div>';
-  h+='<div class="btn-row" style="margin-bottom:14px"><button class="btn btn-success" onclick="_editAcquiredId=null;nav(\'acquired_add\')">➕ 新增收购车辆</button></div>';
-  h+='<div class="card"><div class="table-wrap"><table><thead><tr><th>编号</th><th>来源/经手人</th><th>车辆</th><th>采购成本</th><th>采购日期</th><th>状态</th><th>成交价</th><th>利润</th><th>操作</th></tr></thead><tbody>';
-  if(list.length===0) { h+='<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--muted)">暂无收购车辆记录</td></tr>'; }
-  list.forEach(function(a){
-    var profit = acquiredProfit(a);
-    var isSold = a.status==='sold';
-    h+='<tr style="background:'+(isSold?'#f5fbf5':'')+'">';
-    h+='<td style="font-weight:700;color:var(--sky);font-size:12px;white-space:nowrap">'+a.id+'</td>';
-    h+='<td>'+(a.name||'—')+'</td>';
-    h+='<td><div style="font-weight:600">'+(a.plate||'')+'</div><div style="font-size:11px;color:var(--muted)">'+(a.brand||'')+(a.model?' '+a.model:'')+(a.color?' · '+a.color:'')+'</div></td>';
-    h+='<td style="font-weight:700;color:#1565c0">'+formatMoney(a.amount||0)+'</td>';
-    h+='<td style="font-size:12px;color:var(--muted)">'+formatDate(a.date)+'</td>';
-    h+='<td>'+(isSold?'<span class="badge badge-green">已售出</span>':'<span class="badge badge-amber">库存中</span>')+'</td>';
-    h+='<td style="font-weight:600">'+(isSold?formatMoney(a.saleAmount||0):'—')+'</td>';
-    h+='<td style="font-weight:700;color:'+(profit==null?'#9e9e9e':(profit>=0?'#2e7d32':'#c62828'))+'">'+(profit==null?'—（未售出）':formatMoney(profit))+'</td>';
-    h+='<td style="white-space:nowrap">';
-    if(canWriteLoans()) {
-      h+='<button class="btn btn-sm btn-primary" onclick="editAcquired(\''+a.id+'\')">✏️ 编辑</button> ';
-      if(!isSold) h+='<button class="btn btn-sm btn-success" onclick="renderSellForm(\''+a.id+'\')">💰 标记已售出</button> ';
+// 读取所有数据（业务员看不到财务记录）
+app.get('/api/data', auth, async (req, res) => {
+  try {
+    const data = await loadData();
+    if (!Array.isArray(data.car_loans)) data.car_loans = [];
+    if (!Array.isArray(data.car_finance)) data.car_finance = [];
+    if (!data.car_nextId) data.car_nextId = 1;
+    if (req.user.role === 'sales') {
+      data.car_finance = []; // 业务员只管业务，财务数据服务器直接不下发
     }
-    if(canDelete()) h+='<button class="btn btn-sm btn-danger" onclick="deleteAcquired(\''+a.id+'\')">删除</button>';
-    if(!canWriteLoans() && !canDelete()) h+='<span style="color:var(--muted);font-size:12px">只读</span>';
-    h+='</td></tr>';
-  });
-  h+='</tbody></table></div></div>';
-  document.getElementById('mainContent').innerHTML = h;
-}
-
-function renderAcquiredForm(data) {
-  var isEdit = !!data;
-  var d = data || {};
-  var h='';
-  h+='<div class="page-header"><div class="page-title">'+(isEdit?'✏️ 编辑收购车辆':'➕ 新增收购车辆')+'</div><div class="page-sub">公司收购/买断持有，尚未计入贷款业务，售出前不产生利润</div></div>';
-  h+='<div class="card"><div class="card-title" style="margin-bottom:12px">🚗 车辆信息</div><div class="form-grid">';
-  h+='<div class="form-group"><label>来源/经手人</label><input type="text" id="a_name" value="'+(d.name||'')+'" placeholder="如：卖家姓名或经手业务员"></div>';
-  h+='<div class="form-group"><label>手机号</label><input type="text" id="a_phone" value="'+(d.phone||'')+'" placeholder="可选"></div>';
-  h+='<div class="form-group"><label>车牌号 *</label><input type="text" id="a_plate" value="'+(d.plate||'')+'" placeholder="如：MHMXF.20"></div>';
-  h+='<div class="form-group"><label>车辆品牌</label><input type="text" id="a_brand" value="'+(d.brand||'')+'" placeholder="如：大G"></div>';
-  h+='<div class="form-group"><label>车辆型号</label><input type="text" id="a_model" value="'+(d.model||'')+'" placeholder="可选"></div>';
-  h+='<div class="form-group"><label>车辆颜色</label><input type="text" id="a_color" value="'+(d.color||'')+'" placeholder="如：黑色"></div>';
-  h+='</div></div>';
-  h+='<div class="card"><div class="card-title" style="margin-bottom:12px">💰 采购信息</div><div class="form-grid">';
-  h+='<div class="form-group"><label>采购成本（$）*</label><input type="number" id="a_amount" value="'+(d.amount||'')+'" placeholder="0" min="0" step="0.01"></div>';
-  h+='<div class="form-group"><label>采购日期</label><input type="date" id="a_date" value="'+(d.date||new Date().toISOString().slice(0,10))+'"></div>';
-  h+='<div class="form-group span3"><label>备注</label><textarea id="a_note" placeholder="其他需要记录的信息...">'+(d.note||'')+'</textarea></div>';
-  h+='</div></div>';
-  h+='<div class="btn-row"><button class="btn btn-primary" onclick="saveAcquired()">✅ 保存</button>';
-  h+='<button class="btn btn-outline" onclick="nav(\'acquired_list\')">🚙 查看收购车辆列表</button></div>';
-  document.getElementById('mainContent').innerHTML = h;
-}
-
-async function saveAcquired() {
-  var plate = document.getElementById("a_plate")?.value.trim();
-  var amount = parseFloat(document.getElementById("a_amount")?.value);
-  if(!plate) { alert("请输入车牌号"); return; }
-  if(!amount || amount<=0) { alert("请输入有效的采购成本"); return; }
-  var data = {
-    assetType:"acquired",
-    name: document.getElementById("a_name")?.value.trim()||"",
-    phone: document.getElementById("a_phone")?.value.trim()||"",
-    plate: plate,
-    brand: document.getElementById("a_brand")?.value.trim()||"",
-    model: document.getElementById("a_model")?.value.trim()||"",
-    color: document.getElementById("a_color")?.value.trim()||"",
-    amount: amount,
-    actualAmount: amount,
-    date: document.getElementById("a_date")?.value||new Date().toISOString().slice(0,10),
-    note: document.getElementById("a_note")?.value.trim()||""
-  };
-  if(_editAcquiredId) {
-    for(var i=0;i<_loans.length;i++) { if(_loans[i].id===_editAcquiredId) { for(var k in data) _loans[i][k]=data[k]; break; } }
-    alert("✅ 收购车辆信息已更新");
-  } else {
-    data.id = genAcquiredId();
-    data.status = "in_stock";
-    _loans.unshift(data);
-    alert("✅ 新增收购车辆成功 编号："+data.id);
+    res.json(data);
+  } catch(e) {
+    res.status(500).json({ error: 'DB_ERROR', message: e.message });
   }
-  saveLoans(); _editAcquiredId=null; nav("acquired_list");
-}
+});
 
-function editAcquired(id) {
-  if(!canWriteLoans()) { alert("⛔ 你的账号没有编辑权限"); return; }
-  for(var i=0;i<_loans.length;i++) { if(_loans[i].id===id) { _editAcquiredId=id; renderAcquiredForm(_loans[i]); return; } }
-}
+// 保存数据（按角色核对每个字段的增/改/删权限）
+app.post('/api/data', auth, async (req, res) => {
+  try {
+    const body = req.body;
+    const allowed = ['car_loans', 'car_finance', 'car_nextId'];
+    const keys = Object.keys(body).filter(k => allowed.includes(k));
+    if (keys.length === 0) return res.json({ ok: true });
 
-async function deleteAcquired(id) {
-  if(!canDelete()) { alert("⛔ 只有老板账号能删除"); return; }
-  if(!confirm("确定删除收购车辆编号 "+id+" 的记录？关联的销售利润流水也会一并删除。")) return;
-  _loans = _loans.filter(function(l){ return l.id!==id; });
-  _financeRecords = _financeRecords.filter(function(r){ return r.loanId!==id; });
-  saveLoans(); saveFinance(); renderAcquiredList();
-}
-
-function renderSellForm(id) {
-  if(!canWriteLoans()) { alert("⛔ 你的账号没有权限"); return; }
-  var a = _loans.find(function(l){ return l.id===id; });
-  if(!a) return;
-  var h='';
-  h+='<div class="page-header"><div class="page-title">💰 标记已售出</div><div class="page-sub">'+a.id+' · '+(a.brand||'')+' '+(a.plate||'')+' · 采购成本 '+formatMoney(a.amount||0)+'</div></div>';
-  h+='<div class="card"><div class="form-grid">';
-  h+='<div class="form-group"><label>成交价（$）*</label><input type="number" id="s_amount" placeholder="0" min="0" step="0.01"></div>';
-  h+='<div class="form-group"><label>成交日期</label><input type="date" id="s_date" value="'+new Date().toISOString().slice(0,10)+'"></div>';
-  h+='<div class="form-group"><label>额外支出（$）<span style="font-size:11px;color:var(--muted);font-weight:400">维修/整备等，可选</span></label><input type="number" id="s_extra" value="'+(a.extraCost||0)+'" placeholder="0" min="0" step="0.01"></div>';
-  h+='<div class="form-group span3"><label>备注</label><textarea id="s_note" placeholder="成交细节..."></textarea></div>';
-  h+='</div></div>';
-  h+='<div class="btn-row"><button class="btn btn-primary" onclick="confirmSell(\''+id+'\')">✅ 确认售出</button>';
-  h+='<button class="btn btn-outline" onclick="nav(\'acquired_list\')">取消</button></div>';
-  document.getElementById('mainContent').innerHTML = h;
-}
-
-async function confirmSell(id) {
-  var a = _loans.find(function(l){ return l.id===id; });
-  if(!a) return;
-  var saleAmount = parseFloat(document.getElementById("s_amount")?.value);
-  if(!saleAmount || saleAmount<=0) { alert("请输入有效的成交价"); return; }
-  var extraCost = parseFloat(document.getElementById("s_extra")?.value)||0;
-  var saleDate = document.getElementById("s_date")?.value||new Date().toISOString().slice(0,10);
-  var note = document.getElementById("s_note")?.value.trim()||"";
-  a.status = "sold";
-  a.saleAmount = saleAmount;
-  a.extraCost = extraCost;
-  a.saleDate = saleDate;
-  var profit = saleAmount - (a.amount||0) - extraCost;
-  // 售出后自动生成一笔"其他收入"财务记录，自动计入净利润（未售出前不产生任何利润）
-  _financeRecords = _financeRecords.filter(function(r){ return !(r.loanId===id && r.category==='收购车辆销售利润'); });
-  _financeRecords.unshift({
-    id: "F"+Date.now(),
-    type: "income",
-    amount: profit,
-    category: "收购车辆销售利润",
-    date: saleDate,
-    loanId: id,
-    note: "收购车辆售出："+(a.brand||'')+' '+(a.plate||'')+"，成交价"+formatMoney(saleAmount)+(extraCost?"，额外支出"+formatMoney(extraCost):"")+(note?"。"+note:"")
-  });
-  await saveLoans(); await saveFinance();
-  alert("✅ 已标记售出，利润 "+formatMoney(profit)+" 已自动计入净利润");
-  nav("acquired_list");
-}
-
-function onLoanSelect() {
-  var id = document.getElementById('fi_loanId')?.value||'';
-  var loan = _loans.find(function(l){return l.id===id;});
-  if(!loan) {
-    document.getElementById('fi_loanInfo').innerHTML='';
-    return;
-  }
-  // 自动填金额（月利息）
-  var amtEl = document.getElementById('fi_amount');
-  if(amtEl) amtEl.value = loan.monthly || 0;
-  // 自动选分类
-  var catEl = document.getElementById('fi_category');
-  if(catEl) catEl.value = '利息收入';
-  // 显示合同信息
-  document.getElementById('fi_loanInfo').innerHTML =
-    '<div style="background:#e3f2fd;border-radius:8px;padding:10px 14px;font-size:12px;display:flex;gap:20px;flex-wrap:wrap">'+
-    '<span>👤 <b>'+loan.name+'</b></span>'+
-    '<span>🚗 '+loan.plate+(loan.brand?' · '+loan.brand:'')+'</span>'+
-    '<span>💰 贷款 <b style="color:#1565c0">$'+loan.amount.toLocaleString()+'</b></span>'+
-    '<span>💵 月利息 <b style="color:#2e7d32">$'+(loan.monthly||0).toFixed(2)+'</b></span>'+
-    '<span>📋 '+(loan.repay||'等额本息')+'</span>'+
-    '<span>状态 '+statusHtml(loan.status)+'</span>'+
-    '</div>';
-}
-
-function renderFinanceForm(type) {
-  var isIncome = type==='income';
-  var canAdd = canAddFinance();
-  var title = isIncome ? (canAdd?'💵 收入登记':'💵 收入记录') : (canAdd?'💸 支出登记':'💸 支出记录');
-  var sub = canAdd ? (isIncome ? '记录贷款收款、利息收入等' : '记录运营开支、办公费用等') : '财务账号为只读，只能查看记录，不能新增/修改/删除';
-  var h='';
-  h+='<div class="page-header"><div class="page-title">'+title+'</div><div class="page-sub">'+sub+'</div></div>';
-
-  if(!canAdd) {
-    h+='<div class="card" style="background:#fafafa;border:1px dashed #cfd8dc;text-align:center;padding:20px;color:var(--muted)">🔒 你的账号（'+(CURRENT_DISPLAY||CURRENT_ROLE)+'）只能查看'+(isIncome?'收入':'支出')+'记录，新增/编辑/删除只有老板能操作</div>';
-  } else {
-
-  h+='<div class="card">';
-
-  // 收入登记：先选合同
-  if(isIncome) {
-    h+='<div style="margin-bottom:14px">';
-    h+='<label style="font-size:12px;font-weight:700;color:var(--navy);display:block;margin-bottom:6px">🔗 选择关联合同（自动带出金额）</label>';
-    h+='<select id="fi_loanId" onchange="onLoanSelect()" style="width:100%;padding:10px 12px;border:1.5px solid #cfd8dc;border-radius:8px;font-size:13px;font-family:inherit;background:#fff">';
-    h+='<option value="">-- 不关联合同（手动填金额）--</option>';
-    // 只显示还款中+逾期的合同
-    var activeL=_loans.filter(function(l){return l.status==='active'||l.status==='overdue';});
-    activeL.sort(function(a,b){return (b.date||'').localeCompare(a.date||'');});
-    activeL.forEach(function(l){
-      h+='<option value="'+l.id+'">'+l.id+' · '+l.name+' · '+l.plate+' · 月息$'+(l.monthly||0).toFixed(2)+'</option>';
-    });
-    h+='</select>';
-    h+='<div id="fi_loanInfo" style="margin-top:8px"></div>';
-    h+='</div>';
-  }
-
-  h+='<div class="form-grid">';
-  h+='<div class="form-group"><label>金额（$）*</label><input type="number" id="fi_amount" placeholder="0" min="0" step="0.01"></div>';
-  h+='<div class="form-group"><label>分类</label><select id="fi_category">';
-  if(isIncome) {
-    h+='<option value="利息收入">利息收入</option><option value="本金回收">本金回收</option><option value="手续费">手续费</option><option value="滞纳金">滞纳金</option><option value="其他收入">其他收入</option>';
-  } else {
-    h+='<option value="办公费用">办公费用</option><option value="工资支出">工资支出</option><option value="推广费用">推广费用</option><option value="车辆评估费">车辆评估费</option><option value="其他支出">其他支出</option>';
-  }
-  h+='</select></div>';
-  h+='<div class="form-group"><label>日期</label><input type="date" id="fi_date" value="'+new Date().toISOString().slice(0,10)+'"></div>';
-  if(!isIncome) {
-    h+='<div class="form-group"><label>关联合同（可选）</label><input type="text" id="fi_loanId" placeholder="如：CL202605001"></div>';
-  }
-  h+='<div class="form-group '+(isIncome?'':'span2')+'"><label>备注</label><input type="text" id="fi_note" placeholder="备注说明"></div>';
-  h+='</div>';
-  h+='<div class="btn-row">';
-  h+='<button class="btn btn-primary" onclick="saveFinanceRecord(\''+type+'\')">✅ 保存</button>';
-  h+='<button class="btn btn-outline" onclick="nav(\'finance_pnl\')">📊 查看利润表</button>';
-  h+='</div></div>';
-
-  }
-
-  // 最近记录
-  h+='<div class="card"><div class="card-header"><div class="card-title">📋 最近'+(isIncome?'收入':'支出')+'记录</div></div>';
-  var records=_financeRecords.filter(function(r){return r.type===type;}).slice(0,15);
-  if(records.length===0){h+='<div style="text-align:center;padding:30px;color:var(--muted)">暂无记录</div>';}
-  else {
-    h+='<div class="table-wrap"><table><thead><tr><th>日期</th><th>金额</th><th>分类</th><th>关联合同</th><th>备注</th><th>操作</th></tr></thead><tbody>';
-    records.forEach(function(r){
-      var loan=r.loanId?_loans.find(function(l){return l.id===r.loanId;}):null;
-      h+='<tr><td>'+formatDate(r.date)+'</td>';
-      h+='<td style="font-weight:600;color:#2e7d32">'+formatMoney(r.amount)+'</td>';
-      h+='<td>'+r.category+'</td>';
-      h+='<td style="font-size:12px">'+(loan?r.loanId+'<br><span style="color:var(--muted)">'+loan.name+'</span>':(r.loanId||'—'))+'</td>';
-      h+='<td style="color:var(--muted);font-size:12px">'+(r.note||'')+'</td>';
-      h+='<td>'+(canDelete()?'<button class="btn btn-sm btn-danger" onclick="deleteFinanceRecord(\''+r.id+'\')">删除</button>':'<span style="color:var(--muted);font-size:12px">只读</span>')+'</td></tr>';
-    });
-    h+='</tbody></table></div>';
-  }
-  h+='</div>';
-  document.getElementById('mainContent').innerHTML = h;
-}
-
-async function saveFinanceRecord(type) {
-  if(!canAddFinance()) { alert("⛔ 你的账号没有新增收支记录的权限"); return; }
-  var amount = parseFloat(document.getElementById("fi_amount")?.value);
-  if(!amount || amount<=0) { alert("请输入有效的金额"); return; }
-  var rec = {
-    id: "F"+Date.now(),
-    type: type,
-    amount: amount,
-    category: document.getElementById("fi_category")?.value||"其他",
-    date: document.getElementById("fi_date")?.value||new Date().toISOString().slice(0,10),
-    loanId: document.getElementById("fi_loanId")?.value.trim()||"",
-    note: document.getElementById("fi_note")?.value.trim()||""
-  };
-  _financeRecords.unshift(rec);
-  saveFinance();
-  alert("✅ "+(type==="income"?"收入":"支出")+"记录已保存");
-  renderFinanceForm(type);
-}
-
-async function deleteFinanceRecord(id) {
-  if(!canDelete()) { alert("⛔ 只有老板账号能删除"); return; }
-  if(!confirm("确定删除此记录？")) return;
-  _financeRecords = _financeRecords.filter(function(r){ return r.id!==id; });
-  saveFinance();
-  renderFinanceForm(_financeRecords.length>0 ? _financeRecords[0].type : "income");
-}
-
-function renderFinancePnL() {
-  var selMonth = document.getElementById('pnlMonth') ? document.getElementById('pnlMonth').value : '';
-  var now = new Date();
-  if(!selMonth) selMonth = now.getFullYear()+'-'+(String(now.getMonth()+1).padStart(2,'0'));
-  function inMonth(d,ym){ return d&&String(d).slice(0,7)===ym; }
-
-  var _lr = loanRecords();
-  var activeLoans  = _lr.filter(function(l){return l.status==='active';});
-  var overdueLoans = _lr.filter(function(l){return l.status==='overdue';});
-  var closedLoans  = _lr.filter(function(l){return l.status==='closed';});
-  var pendingLoans = _lr.filter(function(l){return l.status==='pending';});
-  var inBetLoans   = _lr.filter(function(l){return l.status==='active'||l.status==='overdue';});
-
-  var totalPrincipal = inBetLoans.reduce(function(s,l){return s+l.amount;},0);
-  var monthNewLoans  = _lr.filter(function(l){return inMonth(l.date,selMonth);});
-  var monthNewAmount = monthNewLoans.reduce(function(s,l){return s+l.amount;},0);
-  var monthNewActual = monthNewLoans.reduce(function(s,l){return s+(l.actualAmount||l.amount*(1-(l.haircut||9.5)/100));},0);
-  // 砍头息 = 贷款金额 - 实际放款（精确计算，不用默认9.5%）
-  var monthHaircut = monthNewLoans.reduce(function(s,l){
-    var hc = l.actualAmount && l.amount > 0
-      ? (l.amount - l.actualAmount)   // 精确：合同金额 - 实际放款
-      : l.amount*(l.haircut||0)/100;  // 备用：用haircut字段
-    return s + (hc > 0 ? hc : 0);
-  },0);
-  // ══ 按月应收/实收数据（从Excel表格提取）══
-  var _MONTHLY_DATA = {"2026-03": {"due_int": 414, "recv_int": 414, "due_prin": 4200, "recv_prin": 4200}, "2026-04": {"due_int": 5174, "recv_int": 5174, "due_prin": 62360, "recv_prin": 58360}, "2026-05": {"due_int": 13750, "recv_int": 13253, "due_prin": 147200, "recv_prin": 135300}, "2026-06": {"due_int": 14022, "recv_int": 9016, "due_prin": 73694, "recv_prin": 47134}, "2026-07": {"due_int": 17460, "recv_int": 1000, "due_prin": 47452, "recv_prin": 5500}, "2026-08": {"due_int": 15912, "recv_int": 0, "due_prin": 39772, "recv_prin": 0}, "2026-09": {"due_int": 14227, "recv_int": 0, "due_prin": 84428, "recv_prin": 0}, "2026-10": {"due_int": 7803, "recv_int": 0, "due_prin": 1833, "recv_prin": 0}, "2026-11": {"due_int": 5843, "recv_int": 0, "due_prin": 833, "recv_prin": 0}, "2026-12": {"due_int": 3305, "recv_int": 0, "due_prin": 4133, "recv_prin": 0}};
-  var _md = _MONTHLY_DATA[selMonth] || null;
-  var monthIntDue   = _md ? _md.due_int   : inBetLoans.reduce(function(s,l){return s+l.amount*(l.rate||0)/100;},0);
-  var monthPrinDue  = _md ? _md.due_prin  : 0;
-  var monthPrinRecv_excel = _md ? _md.recv_prin : 0;
-  var monthIntRecv_excel  = _md ? _md.recv_int  : 0;
-  var monthDueRecords = _md ? [_md] : [];
-  var _hasExcelData = !!_md;
-  var recInc  = _financeRecords.filter(function(r){return r.type==='income' && inMonth(r.date,selMonth);});
-  var recExp  = _financeRecords.filter(function(r){return r.type==='expense'&& inMonth(r.date,selMonth);});
-  // 利息收入（不含本金回收）
-  var manIntInc   = recInc.filter(function(r){return r.category!=='本金回收';}).reduce(function(s,r){return s+r.amount;},0);
-  var manPrinRecov= recInc.filter(function(r){return r.category==='本金回收';}).reduce(function(s,r){return s+r.amount;},0);
-  var manInc = manIntInc; // 利润只计利息相关收入，本金回收不算
-  var manExp  = recExp.reduce(function(s,r){return s+r.amount;},0);
-  // 实收利息：优先Excel数据，其次收入登记
-  var monthIntRecv_login  = recInc.filter(function(r){return r.category==='利息收入';}).reduce(function(s,r){return s+r.amount;},0);
-  var monthPrinRecv_login = manPrinRecov;
-  var monthIntRecv  = _hasExcelData ? monthIntRecv_excel  : monthIntRecv_login;
-  var monthPrinRecv = _hasExcelData ? monthPrinRecv_excel : monthPrinRecv_login;
-  var incByCat={}, expByCat={};
-  recInc.forEach(function(r){incByCat[r.category]=(incByCat[r.category]||0)+r.amount;});
-  recExp.forEach(function(r){expByCat[r.category]=(expByCat[r.category]||0)+r.amount;});
-  var netProfit = monthHaircut + manInc - manExp; // 砍头息+利息收入-支出（不含本金回收）
-  var totalLoansActive = _lr.filter(function(l){return l.status!=='pending';}).length;
-  var overdueRate = totalLoansActive>0 ? (overdueLoans.length/totalLoansActive*100).toFixed(1) : 0;
-  var grandTotal = _lr.reduce(function(s,l){return s+l.amount;},0);
-
-  var months=[];
-  for(var mi=0;mi<8;mi++){
-    var md=new Date(now.getFullYear(),now.getMonth()-mi,1);
-    months.push(md.getFullYear()+'-'+String(md.getMonth()+1).padStart(2,'0'));
-  }
-
-  var h='';
-  h+='<div class="page-header"><div class="page-title">📊 专业利润表</div>';
-  h+='<div class="page-sub">数据自动归集 · 实时更新</div></div>';
-
-  h+='<div class="search-row" style="margin-bottom:14px"><select id="pnlMonth" onchange="renderFinancePnL()">';
-  months.forEach(function(m){h+='<option value="'+m+'"'+(m===selMonth?' selected':'')+'>'+m+'</option>';});
-  h+='</select></div>';
-
-  h+='<div style="margin-bottom:10px;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px">▌ 资产规模</div>';
-  h+='<div class="stats-grid" style="margin-bottom:18px">';
-  h+='<div class="stat-card blue"><div class="stat-icon">🏦</div><div class="stat-label">在贷本金总额</div><div class="stat-value" style="font-size:18px">$'+totalPrincipal.toLocaleString()+'</div><div class="stat-sub">共'+(activeLoans.length+overdueLoans.length)+'笔在贷</div></div>';
-  h+='<div class="stat-card green"><div class="stat-icon">📤</div><div class="stat-label">本月新放款</div><div class="stat-value" style="font-size:18px">$'+monthNewAmount.toLocaleString()+'</div><div class="stat-sub">'+monthNewLoans.length+'笔 · 实际$'+Math.round(monthNewActual).toLocaleString()+'</div></div>';
-  h+='<div class="stat-card amber"><div class="stat-icon">💰</div><div class="stat-label">月应收利息</div><div class="stat-value" style="font-size:18px">$'+monthIntDue.toFixed(0)+'</div><div class="stat-sub">'+(_hasExcelData?'来自Excel数据':'按在贷合同估算')+'</div></div>';
-  h+='</div>';
-  // 第二行：实收统计
-  h+='<div style="margin-bottom:10px;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px">▌ 本月实收（来自收入登记）</div>';
-  h+='<div class="stats-grid" style="margin-bottom:18px">';
-  h+='<div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-label">实收利息</div><div class="stat-value" style="font-size:18px">$'+monthIntRecv.toFixed(0)+'</div><div class="stat-sub">利息收入登记合计</div></div>';
-  h+='<div class="stat-card blue"><div class="stat-icon">🏦</div><div class="stat-label">实收本金</div><div class="stat-value" style="font-size:18px">$'+monthPrinRecv.toFixed(0)+'</div><div class="stat-sub">本金回收登记合计</div>';
-  var collectRate = monthIntDue>0?Math.round(monthIntRecv/monthIntDue*100):0;
-  h+='</div><div class="stat-card '+(collectRate>=80?'green':collectRate>=50?'amber':'red')+'"><div class="stat-icon">📊</div><div class="stat-label">利息回收率</div><div class="stat-value" style="font-size:18px">'+collectRate+'%</div><div class="stat-sub">实收/应收</div></div>';
-  h+='<div class="stat-card '+(overdueRate>10?'red':'purple')+'"><div class="stat-icon">⚠️</div><div class="stat-label">逾期率</div><div class="stat-value" style="font-size:18px">'+overdueRate+'%</div><div class="stat-sub">'+overdueLoans.length+'笔逾期</div></div>';
-
-  h+='</div>';
-
-
-  // 损益表
-  h+='<div class="card">';
-  h+='<div class="card-title" style="margin-bottom:16px">📋 '+selMonth+' 损益表</div>';
-
-  function row(label,amount,color,indent,bold){
-    var bg=bold?'background:#fafafa;':'';
-    var fw=bold?'font-weight:700;':'';
-    var pl=indent?'padding-left:24px;':'';
-    var lc=indent?'color:var(--muted)':'color:var(--text)';
-    var fs=bold?'font-size:15px':'font-size:13px';
-    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 8px;border-bottom:1px solid #f5f5f5;'+fw+bg+pl+'">'+
-           '<span style="font-size:13px;'+lc+'">'+label+'</span>'+
-           '<span style="font-weight:600;color:'+(color||'var(--text)')+';'+fs+'">$'+amount.toFixed(2)+'</span></div>';
-  }
-  function sec(label){
-    return '<div style="padding:10px 8px 4px;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:1px;border-top:2px solid #e0e0e0;margin-top:4px">'+label+'</div>';
-  }
-
-  h+=sec('▌ 一、营业收入');
-  h+=row('砍头息收入（本月新放款自动归集）',monthHaircut,'#2e7d32',true,false);
-  for(var k in incByCat) {
-    if(k==='本金回收') continue; // 本金回收单独在下方显示
-    h+=row(k,incByCat[k],'#2e7d32',true,false);
-  }
-  if(manPrinRecov>0) h+=row('本金回收（不计入利润，仅供参考）',manPrinRecov,'#9e9e9e',true,false);
-  h+=row('营业收入合计（利息+砍头息）',monthHaircut+manInc,'#1565c0',false,true);
-
-  h+=sec('▌ 二、应收利息（参考，未计入损益）');
-  h+=row('本月应收利息（在贷合同）',monthIntDue,'#f57c00',true,false);
-  h+='<div style="padding:4px 8px 10px 24px;font-size:11px;color:var(--muted)">※ 实际收到后请在"录入收入"里登记，方可计入损益</div>';
-
-  h+=sec('▌ 三、营业成本与支出');
-  var hasExp=false;
-  for(var k in expByCat){h+=row(k,expByCat[k],'#c62828',true,false);hasExp=true;}
-  if(!hasExp) h+='<div style="padding:8px 8px 8px 24px;font-size:12px;color:var(--muted)">本月暂无支出记录 — 请在"录入支出"添加</div>';
-  h+=row('营业成本合计',manExp,'#c62828',false,true);
-
-  h+=sec('▌ 四、净利润');
-  h+=row('净利润（营业收入 − 营业成本）',netProfit,netProfit>=0?'#2e7d32':'#c62828',false,true);
-  h+='<div style="padding:6px 8px 14px;font-size:11px;color:var(--muted)">※ 净利润 = 砍头息 + 利息收入 − 运营支出（本金回收不计入利润，只是资金回流）</div>';
-  h+='</div>';
-
-  // 贷款组合
-  h+='<div class="card"><div class="card-title" style="margin-bottom:14px">📈 贷款组合状态</div>';
-  h+='<div class="table-wrap"><table><thead><tr><th>状态</th><th>笔数</th><th>本金合计</th><th>占比</th></tr></thead><tbody>';
-  var groups=[
-    {label:'还款中',list:activeLoans,color:'#2e7d32'},
-    {label:'逾期',list:overdueLoans,color:'#c62828'},
-    {label:'审核中',list:pendingLoans,color:'#f57c00'},
-    {label:'已结清',list:closedLoans,color:'#9e9e9e'}
-  ];
-  groups.forEach(function(g){
-    var amt=g.list.reduce(function(s,l){return s+l.amount;},0);
-    var pct=grandTotal>0?(amt/grandTotal*100).toFixed(1):0;
-    h+='<tr><td style="font-weight:600;color:'+g.color+'">'+g.label+'</td><td>'+g.list.length+'笔</td><td style="font-weight:600">$'+amt.toLocaleString()+'</td><td>'+pct+'%</td></tr>';
-  });
-  h+='<tr style="font-weight:700;background:#f5f5f5"><td>合计</td><td>'+_lr.length+'笔</td><td>$'+grandTotal.toLocaleString()+'</td><td>100%</td></tr>';
-  h+='</tbody></table></div></div>';
-
-  h+='<div class="btn-row">';
-  h+='<button class="btn btn-primary" onclick="nav(\'finance_income\')">💵 录入收入</button>';
-  h+='<button class="btn btn-danger" onclick="nav(\'finance_expense\')">💸 录入支出</button>';
-  h+='<button class="btn btn-outline" onclick="nav(\'finance_cashflow\')">💰 现金流水</button>';
-  h+='</div>';
-
-  document.getElementById('mainContent').innerHTML = h;
-  var sel=document.getElementById('pnlMonth');
-  if(sel) sel.value=selMonth;
-}
-
-function renderCashFlow() {
-  var cashRecords = _financeRecords.filter(function(r){return r.type==="income"||r.type==="expense";}); // 排除"提取存档"类型的记录，那不是真实现金收支
-  var sorted = cashRecords.slice().sort(function(a,b){ return a.date.localeCompare(b.date); });
-  var running = 0; var flowData = [];
-  for(var i=0;i<sorted.length;i++) { var r=sorted[i]; if(r.type==="income") running+=r.amount; else running-=r.amount; flowData.push({date:r.date,type:r.type,amount:r.amount,balance:running,category:r.category}); }
-  var totalIncome = cashRecords.filter(function(r){return r.type==="income"}).reduce(function(s,r){return s+r.amount},0);
-  var totalExpense = cashRecords.filter(function(r){return r.type==="expense"}).reduce(function(s,r){return s+r.amount},0);
-  var balance = totalIncome - totalExpense;
-  var h = '<div class="page-header"><div class="page-title">💰 现金流</div><div class="page-sub">资金流水与余额变化</div></div>';
-  h += '<div class="stats-grid"><div class="stat-card green"><div class="stat-label">总收入</div><div class="stat-value">'+formatMoney(totalIncome)+'</div></div>';
-  h += '<div class="stat-card red"><div class="stat-label">总支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div></div>';
-  h += '<div class="stat-card blue"><div class="stat-label">当前余额</div><div class="stat-value">'+formatMoney(balance)+'</div></div>';
-  h += '<div class="stat-card amber"><div class="stat-label">交易笔数</div><div class="stat-value">'+cashRecords.length+'</div></div></div>';
-  h += '<div class="card"><div class="card-header"><div class="card-title">📋 流水明细</div></div>';
-  if(flowData.length===0) { h += '<div style="text-align:center;padding:30px;color:var(--muted)">暂无流水记录</div>'; }
-  else {
-    h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>类型</th><th>分类</th><th>金额</th><th>余额</th></tr></thead><tbody>';
-    for(var i=flowData.length-1;i>=0;i--) {
-      var r = flowData[i]; var amtStyle = r.type==="income" ? "color:var(--green);font-weight:600" : "color:var(--red);font-weight:600";
-      var tl = r.type==="income" ? "收入" : "支出";
-      h += '<tr><td>'+formatDate(r.date)+'</td><td>'+tl+'</td><td>'+r.category+'</td><td style="'+amtStyle+'">'+(r.type==="income"?"+":"-")+formatMoney(r.amount)+'</td><td style="font-weight:600">'+formatMoney(r.balance)+'</td></tr>';
+    let current = null;
+    if (keys.includes('car_loans') || keys.includes('car_finance')) {
+      current = await loadData();
     }
-    h += "</tbody></table></div>";
+    for (const key of keys) {
+      if (key === 'car_nextId') {
+        if (req.user.role === 'finance') return res.status(403).json({ error: 'PERMISSION_DENIED', message: '财务无权修改此数据' });
+        continue;
+      }
+      const check = checkKeyPermission(req.user.role, key, body[key], current);
+      if (!check.ok) return res.status(403).json({ error: 'PERMISSION_DENIED', message: check.reason });
+    }
+
+    const rows = keys.map(key => ({ key, value: body[key] }));
+    const { error } = await supabase.from('pawndata').upsert(rows, { onConflict: 'key' });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
   }
-  h += "</div>";
-  document.getElementById("mainContent").innerHTML = h;
-}
+});
 
-function renderOverdue() {
-  var overdue = _loans.filter(function(l){return l.status==="overdue"});
-  var h = '<div class="page-header"><div class="page-title">⚠️ 逾期催收</div><div class="page-sub">共 '+overdue.length+' 笔逾期贷款</div></div>';
-  if(overdue.length===0) { h += '<div class="card" style="text-align:center;padding:50px"><div style="font-size:48px;margin-bottom:12px">🎉</div><div style="font-size:16px;font-weight:600;color:var(--green)">暂无逾期贷款！</div></div>'; document.getElementById("mainContent").innerHTML = h; return; }
-  h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>手机号</th><th>车牌</th><th>金额</th><th>月供</th><th>放款日</th><th>操作</th></tr></thead><tbody>';
-  for(var i=0;i<overdue.length;i++) { var l=overdue[i]; h += '<tr style="background:#fff5f5"><td style="font-weight:600;color:var(--red)">'+l.id+'</td><td>'+l.name+'</td><td>'+l.phone+'</td><td>'+l.plate+'</td><td style="font-weight:600">'+formatMoney(l.amount)+'</td><td>'+formatMoney(calcMonthly(l.amount,l.rate,l.term))+'</td><td>'+formatDate(l.date)+'</td><td>'+(canWriteLoans()?'<button class="btn btn-sm btn-primary" onclick="editLoan(\''+l.id+'\')">处理</button>':'<span style="color:var(--muted);font-size:12px">只读</span>')+'</td></tr>'; }
-  h += "</tbody></table></div></div>";
-  document.getElementById("mainContent").innerHTML = h;
-}
+// 测试连接
+app.get('/api/test', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('pawndata').select('key').limit(1);
+    if (error) return res.json({ ok: false, message: error.message });
+    res.json({ ok: true, message: '数据库连接正常' });
+  } catch(e) {
+    res.json({ ok: false, message: e.message });
+  }
+});
 
-async function initDemoData() {
-  if(_loans.length > 0) return;
-  _loans = [
-    {id:"CL202605001", name:"张三", phone:"13888888888", plate:"京A88888", brand:"宝马", model:"X5 2022款", estimate:45, amount:360000, term:24, rate:0.7, repay:"等额本息", status:"active", date:"2026-05-15", note:"优质客户"},
-    {id:"CL202605002", name:"李四", phone:"13966666666", plate:"沪B12345", brand:"丰田", model:"凯美瑞 2021款", estimate:18, amount:144000, term:12, rate:0.9, repay:"等额本息", status:"active", date:"2026-05-10", note:""},
-    {id:"CL202605003", name:"王五", phone:"13755555555", plate:"粤C67890", brand:"奔驰", model:"C200L", estimate:30, amount:300000, term:36, rate:0.6, repay:"先息后本", status:"pending", date:"2026-05-20", note:"待补充流水"},
-    {id:"CL202605004", name:"赵六", phone:"13633333333", plate:"苏D24680", brand:"大众", model:"帕萨特 2020款", estimate:15, amount:120000, term:12, rate:1.0, repay:"等额本息", status:"overdue", date:"2025-11-01", note:"逾期35天"},
-    {id:"CL202605005", name:"孙七", phone:"13522222222", plate:"浙E13579", brand:"本田", model:"雅阁 2019款", estimate:12, amount:96000, term:12, rate:0.8, repay:"等额本息", status:"closed", date:"2025-01-10", note:"已结清"},
-    {id:"CL202605006", name:"周八", phone:"13411111111", plate:"川F97531", brand:"奥迪", model:"A4L", estimate:25, amount:200000, term:24, rate:0.75, repay:"等额本息", status:"active", date:"2026-04-01", note:""},
-  ];
-  saveLoans();
-  if(_financeRecords.length>0) return;
-  _financeRecords = [
-    {id:"F1", type:"income", amount:18000, category:"利息收入", date:"2026-05-15", loanId:"CL202605001", note:"5月利息"},
-    {id:"F2", type:"income", amount:7200, category:"利息收入", date:"2026-05-10", loanId:"CL202605002", note:"5月利息"},
-    {id:"F3", type:"income", amount:5000, category:"手续费", date:"2026-05-01", loanId:"", note:"贷款手续费"},
-    {id:"F4", type:"expense", amount:8000, category:"工资支出", date:"2026-05-05", loanId:"", note:"员工工资"},
-    {id:"F5", type:"expense", amount:3000, category:"办公费用", date:"2026-05-08", loanId:"", note:"办公室租金"},
-    {id:"F6", type:"income", amount:15000, category:"本金回收", date:"2026-05-20", loanId:"CL202605005", note:"结清还款"},
-  ];
-  saveFinance();
-}
+// 备份数据（只有老板能导出全量原始数据）
+app.get('/api/backup', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'boss') return res.status(403).json({ error: 'PERMISSION_DENIED', message: '只有老板能导出全量备份' });
+    const data = await loadData();
+    res.setHeader('Content-Disposition', `attachment; filename="car_backup_${new Date().toISOString().slice(0,10)}.json"`);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(data, null, 2));
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-document.getElementById("dateDisplay").textContent = new Date().toLocaleDateString("zh-CN", {month:"long", day:"numeric", weekday:"short"});
-
-// 登录成功/恢复会话后才真正启动app（加载数据、建侧边栏）
-function startApp() {
-  var chip = document.getElementById("userChip");
-  if(chip) chip.textContent = (CURRENT_DISPLAY||ROLE_LABEL[CURRENT_ROLE]||CURRENT_ROLE)+" · "+CURRENT_USERNAME;
-  buildSidebar(); buildMobNav();
-  loadAllData().then(function() {
-    renderHome();
-    document.getElementById("loadingOverlay").classList.remove("show");
-  }).catch(function() {
-    document.getElementById("loadingOverlay").classList.remove("show");
-    renderHome();
+initUsers().finally(() => {
+  app.listen(PORT, () => {
+    console.log(`\n${'═'.repeat(50)}`);
+    console.log(`  🚗 MORODOK 汽车抵押贷款管理系统`);
+    console.log(`${'═'.repeat(50)}`);
+    console.log(`  访问地址: http://localhost:${PORT}`);
+    console.log(`${'═'.repeat(50)}\n`);
   });
-}
-
-document.getElementById("loadingOverlay").classList.remove("show");
-tryResumeSession(); // 没有有效会话会自动弹登录框，登录成功会调用 startApp()
-</script>
-</body>
-</html>
+});
