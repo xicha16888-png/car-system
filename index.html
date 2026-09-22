@@ -826,6 +826,7 @@ async function doImportConfirm() {
       plate:row.plate,estimate:row.appraise,amount:row.amount,actualAmount:row.actual,
       haircut:row.haircut,rate:row.rate,monthly:row.monthly,term:impTerm,repay:impRepay,status:'active',
       date:row.date||new Date().toISOString().slice(0,10),
+      agent:row.staff||'',
       note:(row.paydate?'还款日:'+row.paydate+' ':'')+row.note,
       totalRepay:impTotalRepay,totalInterest:impTotalInterest,schedule:[]};
     _loans.push(loan);
@@ -1622,6 +1623,7 @@ function renderAddForm(data) {
   h += "<div class=\"form-group\"><label>客户姓名 *</label><input type=\"text\" id=\"f_name\" value=\""+(d.name||"")+"\" placeholder=\"请输入姓名\"></div>";
   h += "<div class=\"form-group\"><label>手机号 *</label><input type=\"text\" id=\"f_phone\" value=\""+(d.phone||"")+"\" placeholder=\"请输入手机号\"></div>";
   h += "<div class=\"form-group\"><label>身份证号</label><input type=\"text\" id=\"f_idcard\" value=\""+(d.idcard||"")+"\" placeholder=\"可选\"></div>";
+  h += "<div class=\"form-group\"><label>经办人<span style=\"font-size:11px;color:var(--muted);font-weight:400\">可选，手动填写负责这笔合同的业务员/经手人姓名</span></label><input type=\"text\" id=\"f_agent\" value=\""+(d.agent||"")+"\" placeholder=\"如：小李\"></div>";
   h += "</div></div>";
   // 车辆信息
   h += "<div class=\"card\"><div class=\"card-title\" style=\"margin-bottom:12px\">🚗 车辆信息</div><div class=\"form-grid\">";
@@ -1972,6 +1974,7 @@ async function saveLoan() {
   var data = {
     name:name, phone:phone, plate:plate,
     idcard:document.getElementById("f_idcard")?.value.trim()||"",
+    agent:document.getElementById("f_agent")?.value.trim()||"",
     brand:document.getElementById("f_brand")?.value.trim()||"",
     color:document.getElementById("f_color")?.value.trim()||"",
     model:document.getElementById("f_model")?.value.trim()||"",
@@ -2032,6 +2035,7 @@ function renderList() {
   h+='<select id="monthFilter" onchange="filterList()"><option value="">全部月份</option>'+getMonthOptions()+'</select>';
   h+='<select id="statusFilter" onchange="filterList();updateStatCards()"><option value="">全部状态</option><option value="active">还款中</option><option value="overdue">已逾期</option><option value="pending">审核中</option><option value="closed">已结清</option></select>';
   h+='<select id="repayFilter" onchange="filterList()"><option value="">全部方式</option><option value="先息后本">先息后本</option><option value="等额本息">等额本息</option><option value="永续贷">永续贷</option><option value="自定义还款">自定义还款</option><option value="实收记账">实收记账</option></select>';
+  h+='<select id="agentFilter" onchange="filterList()"><option value="">全部经办人</option>'+getAgentOptions()+'</select>';
   h+='<button class="btn btn-success" onclick="nav(\'add\')">➕ 新增</button>';
   h+='</div>';
   h+='<div id="listResult"></div>';
@@ -2044,6 +2048,14 @@ function getMonthOptions() {
   loanRecords().forEach(function(l){if(l.date)months[l.date.slice(0,7)]=1;});
   var arr=Object.keys(months).sort().reverse();
   return arr.map(function(m){return '<option value="'+m+'">'+m+'</option>';}).join('');
+}
+// 经办人筛选下拉——不是固定账号列表，是从已经填过的合同里去重出现过的名字，
+// 业务员手填的名字有出入（比如"小李"/"李经理"）不会自动合并，只是方便筛选
+function getAgentOptions() {
+  var agents={};
+  loanRecords().forEach(function(l){ if(l.agent) agents[l.agent]=1; });
+  var arr=Object.keys(agents).sort();
+  return arr.map(function(a){return '<option value="'+a+'">'+a+'</option>';}).join('');
 }
 
 function setStatusFilter(val) {
@@ -2075,11 +2087,13 @@ function filterList() {
   var s=document.getElementById('statusFilter')?.value||'';
   var m=document.getElementById('monthFilter')?.value||'';
   var rp=document.getElementById('repayFilter')?.value||'';
+  var ag=document.getElementById('agentFilter')?.value||'';
   var filtered=loanRecords().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
-  if(q) filtered=filtered.filter(function(l){return (l.name||'').toLowerCase().indexOf(q)>=0||(l.phone||'').indexOf(q)>=0||(l.plate||'').toLowerCase().indexOf(q)>=0||(l.id||'').toLowerCase().indexOf(q)>=0;});
+  if(q) filtered=filtered.filter(function(l){return (l.name||'').toLowerCase().indexOf(q)>=0||(l.phone||'').indexOf(q)>=0||(l.plate||'').toLowerCase().indexOf(q)>=0||(l.id||'').toLowerCase().indexOf(q)>=0||(l.agent||'').toLowerCase().indexOf(q)>=0;});
   if(s) filtered=filtered.filter(function(l){return l.status===s;});
   if(m) filtered=filtered.filter(function(l){return l.date&&l.date.slice(0,7)===m;});
   if(rp) filtered=filtered.filter(function(l){return (l.repay||'等额本息')===rp;});
+  if(ag) filtered=filtered.filter(function(l){return (l.agent||'')===ag;});
   var result=document.getElementById('listResult'); if(!result) return;
   if(filtered.length===0){result.innerHTML='<div style="text-align:center;padding:48px;color:var(--muted)">暂无匹配记录</div>';return;}
   // 总金额统计
@@ -2106,7 +2120,7 @@ function filterList() {
       gloans.forEach(function(l){
         var sc=l.status==='overdue'?'overdue':l.status==='closed'?'closed':l.status==='pending'?'pending':'';
         h+='<div class="loan-card '+sc+'">';
-        h+='<div class="loan-card-top"><div><div class="loan-card-name">'+l.name+'</div><div class="loan-card-meta">'+l.id+' · '+formatDate(l.date)+'</div></div>'+statusHtml(l.status)+'</div>';
+        h+='<div class="loan-card-top"><div><div class="loan-card-name">'+l.name+'</div><div class="loan-card-meta">'+l.id+' · '+formatDate(l.date)+(l.agent?' · 经办：'+l.agent:'')+'</div></div>'+statusHtml(l.status)+'</div>';
         h+='<div class="loan-card-row"><span class="loan-card-lbl">🚗 车牌</span><span class="loan-card-val">'+l.plate+(l.brand?' · '+l.brand:'')+'</span></div>';
         h+='<div class="loan-card-row"><span class="loan-card-lbl">📱 手机</span><span class="loan-card-val">'+l.phone+'</span></div>';
         h+='<div class="loan-card-row"><span class="loan-card-lbl">💰 贷款金额</span><span class="loan-card-val" style="color:var(--sky)">'+formatMoney(l.amount)+'</span></div>';
@@ -2139,7 +2153,7 @@ function filterList() {
         var sc=l.status==='overdue'?'#ffebee':l.status==='closed'?'#fafafa':l.status==='pending'?'#fff8e1':'';
         h+='<tr style="background:'+sc+'">';
         h+='<td style="font-weight:700;color:var(--sky);font-size:12px;white-space:nowrap">'+l.id+'</td>';
-        h+='<td style="font-weight:600;color:var(--navy)">'+l.name+'</td>';
+        h+='<td><div style="font-weight:600;color:var(--navy)">'+l.name+'</div>'+(l.agent?'<div style="font-size:11px;color:var(--muted)">经办：'+l.agent+'</div>':'')+'</td>';
         h+='<td style="font-size:12px">'+l.phone+'</td>';
         h+='<td><div style="font-weight:600">'+l.plate+'</div><div style="font-size:11px;color:var(--muted)">'+(l.brand||'')+(l.color?' · '+l.color:'')+'</div></td>';
         h+='<td style="font-weight:700;color:#1565c0">'+formatMoney(l.amount)+'</td>';
