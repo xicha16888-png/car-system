@@ -170,6 +170,7 @@ app.post('/api/users', auth, async (req, res) => {
     USER_RECORDS.push(rec);
     await persistUsers();
     rebuildUserIndex();
+    await logAccountChange(req.user, 'add', displayName + '（' + username + '）', '新增账号，角色：' + role);
     res.json({ ok: true, user: sanitizeUser(rec) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -184,6 +185,7 @@ app.post('/api/users/:id/reset-password', auth, async (req, res) => {
     await persistUsers();
     rebuildUserIndex();
     invalidateSessionsFor(rec.usernames);
+    await logAccountChange(req.user, 'edit', rec.displayName + '（' + rec.usernames[0] + '）', '重置了密码');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -194,6 +196,7 @@ app.post('/api/users/:id/update', auth, async (req, res) => {
     if (!rec) return res.status(404).json({ error: 'NOT_FOUND', message: '账号不存在' });
     const body = req.body || {};
     const isSelf = (rec.usernames || []).indexOf(req.user.username) !== -1;
+    const changeNotes = [];
     if (body.role !== undefined) {
       const role = String(body.role).trim();
       if (VALID_ROLES.indexOf(role) === -1) return res.status(400).json({ error: 'BAD_INPUT', message: '角色不合法' });
@@ -201,6 +204,7 @@ app.post('/api/users/:id/update', auth, async (req, res) => {
       if (rec.role === 'boss' && role !== 'boss' && rec.status === 'active' && activeBossCount() <= 1) {
         return res.status(400).json({ error: 'LAST_BOSS', message: '系统至少要保留一个启用中的老板账号' });
       }
+      if (role !== rec.role) changeNotes.push('角色改为' + role);
       rec.role = role;
     }
     if (body.status !== undefined) {
@@ -210,15 +214,17 @@ app.post('/api/users/:id/update', auth, async (req, res) => {
       if (rec.role === 'boss' && status === 'disabled' && activeBossCount() <= 1) {
         return res.status(400).json({ error: 'LAST_BOSS', message: '系统至少要保留一个启用中的老板账号' });
       }
+      if (status !== rec.status) changeNotes.push(status === 'disabled' ? '禁用了账号' : '启用了账号');
       rec.status = status;
     }
     if (body.displayName !== undefined) {
       const dn = String(body.displayName).trim();
-      if (dn) rec.displayName = dn;
+      if (dn && dn !== rec.displayName) { changeNotes.push('姓名改为' + dn); rec.displayName = dn; }
     }
     await persistUsers();
     rebuildUserIndex();
     if (body.role !== undefined || body.status !== undefined) invalidateSessionsFor(rec.usernames);
+    if (changeNotes.length > 0) await logAccountChange(req.user, 'edit', rec.displayName + '（' + rec.usernames[0] + '）', changeNotes.join('，'));
     res.json({ ok: true, user: sanitizeUser(rec) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -236,6 +242,7 @@ app.delete('/api/users/:id', auth, async (req, res) => {
     await persistUsers();
     rebuildUserIndex();
     invalidateSessionsFor(rec.usernames);
+    await logAccountChange(req.user, 'delete', rec.displayName + '（' + rec.usernames[0] + '）', '删除了账号');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -274,12 +281,34 @@ function diffById(oldArr, newArr) {
   return { added, edited, removed };
 }
 
+// 2026-09：不再直接把客户端提交的"完整数组"当成权威真相存进库里（老板除外）。
+// 起因：业务员/财务这类角色本来在读的时候就看不到完整数据（比如业务员 GET
+// 的时候 car_finance 永远是空的，见下面 /api/data GET），如果保存的时候直接
+// 存"客户端提交的这份数组"，等于拿一份"这个角色本来就看不全"的快照去覆盖
+// 数据库里真实的完整数据——哪怕权限检查（下面的 removed/edited 判断）拦住了
+// "明显越权"的情况，只要客户端这份数据是过时的（比如两个人前后保存），一样
+// 会把别人这期间新增的记录冲掉。
+// 修复：除老板外，一律拿数据库里真实的当前数据 + 这次校验通过的增/改/删，
+// 重新拼出真正要存的值，而不是直接相信客户端提交的完整数组本身。
+function mergeArrayUpdate(oldArr, added, edited, removed, allowDel) {
+  oldArr = Array.isArray(oldArr) ? oldArr : [];
+  const removedIds = new Set(allowDel ? removed.map(x => x.id) : []);
+  const editedMap = new Map(edited.map(x => [x.id, x]));
+  const kept = oldArr.filter(x => !removedIds.has(x.id)).map(x => editedMap.has(x.id) ? editedMap.get(x.id) : x);
+  return added.concat(kept); // 新增的放最前面，跟客户端 unshift() 的习惯保持一致
+}
+
 function checkKeyPermission(role, key, newValue, currentData) {
   const perm = (ROLE_PERMS[role] || {})[key];
   if (!perm) return { ok: false, reason: `角色无权修改 ${key}` };
-  if (perm.add === true && perm.edit === true && perm.del === true) return { ok: true }; // 老板全权，跳过diff，省点计算
-  const oldArr = currentData[key] || [];
+  const oldArr = (currentData && currentData[key]) || [];
+  // 2026-09：不管老板还是别的角色，diff都要算出来——除了给非老板角色做权限校验，
+  // 现在还要拿它给"操作日志"记一笔"谁新增/改了/删了哪条记录"，所以老板这条快速
+  // 通道也不再跳过这一步了。
   const { added, edited, removed } = diffById(oldArr, newValue);
+  if (perm.add === true && perm.edit === true && perm.del === true) {
+    return { ok: true, mergedValue: newValue, added, edited, removed }; // 老板全权，信任客户端提交的完整数组
+  }
   if (removed.length > 0 && !perm.del) return { ok: false, reason: '无权删除记录' };
   if (edited.length > 0 && !perm.edit) return { ok: false, reason: '无权修改已有记录' };
   if (added.length > 0) {
@@ -296,7 +325,66 @@ function checkKeyPermission(role, key, newValue, currentData) {
       return { ok: false, reason: '无权新增记录' };
     }
   }
-  return { ok: true };
+  return { ok: true, mergedValue: mergeArrayUpdate(oldArr, added, edited, removed, !!perm.del), added, edited, removed };
+}
+
+// ══════════════════════════════════════════════════════════
+// ══ 操作日志（工作日志）══ 2026-09 新增：老板要能看到"谁动了系统"——
+// 每次贷款/收购车辆/财务记录的新增、编辑、删除，都自动记一笔：谁（账号+角色）、
+// 什么时间、动了哪张表的哪条记录、大致是什么内容。只读、追加写入，业务员/财务
+// 自己看不到（只有老板能看，跟账号管理一样），避免争议时说不清楚。
+// ══════════════════════════════════════════════════════════
+const OPLOG_MAX = 3000; // 只保留最近这么多条，避免无限增长
+let OPLOG = [];
+function genOpId() { return 'OP' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+async function initOplog() {
+  try {
+    const { data, error } = await supabase.from('pawndata').select('value').eq('key', 'car_oplog').maybeSingle();
+    if (!error && data && Array.isArray(data.value)) OPLOG = data.value;
+    else OPLOG = [];
+  } catch (e) {
+    console.error('  操作日志：初始化失败，先用空日志兜底：', e.message);
+    OPLOG = [];
+  }
+}
+async function persistOplog() {
+  const { error } = await supabase.from('pawndata').upsert([{ key: 'car_oplog', value: OPLOG }], { onConflict: 'key' });
+  if (error) throw new Error('DB_WRITE_ERROR: ' + error.message);
+}
+// 贷款/收购车辆记录 -> 一句话摘要，方便日志里一眼看懂动的是谁
+function summarizeLoanRecord(r) {
+  if (!r) return '';
+  if (r.assetType === 'acquired') return '收购车辆 ' + (r.plate || '') + (r.brand ? ' ' + r.brand : '');
+  return (r.name || '') + ' · ' + (r.plate || '') + ' · ' + (r.amount != null ? '$' + r.amount : '');
+}
+function summarizeFinanceRecord(r) {
+  if (!r) return '';
+  return (r.category || '') + ' $' + (r.amount != null ? r.amount : 0) + (r.loanId ? '（关联' + r.loanId + '）' : '');
+}
+// 账号管理动作（新增/改角色改状态/重置密码/删除账号）单独记一笔日志——这些操作全都
+// 只有老板能做，但老板账号可能不止一个，日志能看出"是哪个老板账号做的"
+async function logAccountChange(user, action, targetDisplay, summary) {
+  try {
+    OPLOG = [{ id: genOpId(), time: new Date().toISOString(), username: user.username, displayName: user.displayName, role: user.role, dataKey: 'car_users', action, targetId: targetDisplay, summary }].concat(OPLOG);
+    if (OPLOG.length > OPLOG_MAX) OPLOG = OPLOG.slice(0, OPLOG_MAX);
+    await persistOplog();
+  } catch (e) {
+    console.error('操作日志写入失败（不影响本次账号操作）：', e.message);
+  }
+}
+
+// 把 checkKeyPermission 算出来的 added/edited/removed 转成一条条日志，追加进 OPLOG
+function logDataChanges(user, key, added, edited, removed) {
+  const summarize = key === 'car_loans' ? summarizeLoanRecord : summarizeFinanceRecord;
+  const now = new Date().toISOString();
+  const entries = [];
+  (added || []).forEach(r => entries.push({ id: genOpId(), time: now, username: user.username, displayName: user.displayName, role: user.role, dataKey: key, action: 'add', targetId: r.id, summary: summarize(r) }));
+  (edited || []).forEach(r => entries.push({ id: genOpId(), time: now, username: user.username, displayName: user.displayName, role: user.role, dataKey: key, action: 'edit', targetId: r.id, summary: summarize(r) }));
+  (removed || []).forEach(r => entries.push({ id: genOpId(), time: now, username: user.username, displayName: user.displayName, role: user.role, dataKey: key, action: 'delete', targetId: r.id, summary: summarize(r) }));
+  if (entries.length === 0) return entries;
+  OPLOG = entries.concat(OPLOG); // 最新的放最前面
+  if (OPLOG.length > OPLOG_MAX) OPLOG = OPLOG.slice(0, OPLOG_MAX);
+  return entries;
 }
 
 function getInitData() {
@@ -346,22 +434,43 @@ app.post('/api/data', auth, async (req, res) => {
     if (keys.includes('car_loans') || keys.includes('car_finance')) {
       current = await loadData();
     }
+    const finalValues = {};
+    const logBatches = []; // 攒够这次请求里所有key的日志，写完数据后一次性落库，避免半途报错留一半日志
     for (const key of keys) {
       if (key === 'car_nextId') {
         if (req.user.role === 'finance') return res.status(403).json({ error: 'PERMISSION_DENIED', message: '财务无权修改此数据' });
+        finalValues[key] = body[key];
         continue;
       }
       const check = checkKeyPermission(req.user.role, key, body[key], current);
       if (!check.ok) return res.status(403).json({ error: 'PERMISSION_DENIED', message: check.reason });
+      finalValues[key] = check.mergedValue;
+      logBatches.push({ key, added: check.added, edited: check.edited, removed: check.removed });
     }
 
-    const rows = keys.map(key => ({ key, value: body[key] }));
+    const rows = keys.map(key => ({ key, value: finalValues[key] }));
     const { error } = await supabase.from('pawndata').upsert(rows, { onConflict: 'key' });
     if (error) return res.status(500).json({ error: error.message });
+
+    // 数据写库成功之后再记操作日志（日志写失败也不影响这次保存本身，只打日志到控制台）
+    try {
+      let hasEntries = false;
+      logBatches.forEach(b => { if (logDataChanges(req.user, b.key, b.added, b.edited, b.removed).length > 0) hasEntries = true; });
+      if (hasEntries) await persistOplog();
+    } catch (logErr) {
+      console.error('操作日志写入失败（不影响本次数据保存）：', logErr.message);
+    }
+
     res.json({ ok: true });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// 操作日志（只有老板能看，追踪谁新增/编辑/删除了哪条贷款或财务记录）
+app.get('/api/oplog', auth, async (req, res) => {
+  if (req.user.role !== 'boss') return res.status(403).json({ error: 'PERMISSION_DENIED', message: '只有老板能查看操作日志' });
+  res.json({ ok: true, log: OPLOG });
 });
 
 // 测试连接
@@ -388,7 +497,7 @@ app.get('/api/backup', auth, async (req, res) => {
   }
 });
 
-initUsers().finally(() => {
+Promise.all([initUsers(), initOplog()]).finally(() => {
   app.listen(PORT, () => {
     console.log(`\n${'═'.repeat(50)}`);
     console.log(`  🚗 MORODOK 汽车抵押贷款管理系统`);
