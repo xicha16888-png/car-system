@@ -1988,7 +1988,7 @@ function filterList() {
       h+='<span style="font-weight:700;font-size:13px"><span id="ma_'+mk+'">'+(isCollapsed?'▶':'▼')+'</span> 📅 '+mk+'</span>';
       h+='<span style="font-size:12px;opacity:.8">'+gloans.length+'笔 · 贷款$'+gamt.toLocaleString()+' · 月息$'+gmon.toFixed(0)+'</span></div>';
       h+='<div id="mg_'+mk+'" style="display:'+(isCollapsed?'none':'')+';margin-bottom:10px"><div class="card" style="padding:0;overflow:hidden;border-radius:0 0 8px 8px"><div class="table-wrap"><table><thead><tr>';
-      h+='<th>#</th><th>客户姓名</th><th>手机号</th><th>车牌 / 品牌</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>月利率%</th><th>月利息</th><th>实际月利率</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th>';
+      h+='<th>#</th><th>客户姓名</th><th>手机号</th><th>车牌 / 品牌</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>月利息</th><th>实际月利率</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th>';
       h+='</tr></thead><tbody>';
       gloans.forEach(function(l){
         var sc=l.status==='overdue'?'#ffebee':l.status==='closed'?'#fafafa':l.status==='pending'?'#fff8e1':'';
@@ -2000,7 +2000,6 @@ function filterList() {
         h+='<td style="font-weight:700;color:#1565c0">'+formatMoney(l.amount)+'</td>';
         h+='<td style="color:#2e7d32">'+formatMoney(l.actualAmount||0)+'</td>';
         h+='<td style="color:#f57c00">'+(l.haircut||0)+'%</td>';
-        h+='<td style="color:#c62828">'+(l.repay===REPAY_ACTUAL?'—':(l.rate||0)+'%')+'</td>';
         h+='<td style="font-weight:600;color:#2e7d32">'+(l.repay===REPAY_ACTUAL?'按实收':'$'+(l.monthly||0).toFixed(2))+'</td>';
         h+='<td style="font-weight:700;color:#c62828;white-space:nowrap">'+loanEffectiveMonthlyRate(l)+'%/月<div style="font-size:10px;color:var(--muted);font-weight:400">综合$'+loanComprehensiveInterest(l).toFixed(2)+'</div></td>';
         h+='<td><span style="font-size:11px;background:#e3f2fd;color:#1565c0;padding:2px 7px;border-radius:10px;white-space:nowrap">'+(l.repay||'等额本息')+'</span></td>';
