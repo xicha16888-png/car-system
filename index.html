@@ -259,6 +259,18 @@ var ROLE_LABEL = {boss:"老板", finance:"财务", sales:"业务员"};
 function authHeaders() { return AUTH_TOKEN ? {"Authorization":"Bearer "+AUTH_TOKEN} : {}; }
 function canWriteLoans() { return CURRENT_ROLE==="boss" || CURRENT_ROLE==="sales"; }
 function canDelete() { return CURRENT_ROLE==="boss"; }
+// ══ 删除密码二次确认 ══ 老板账号本来就是唯一能删除数据的角色，这里再加一道
+// 删除密码，防止误删/手滑，或者老板账号忘记退出被别人碰到——每次真删除数据
+// 前都要求手动输入这个密码，不对或者取消都不会真的执行删除。
+// 注意：这只是前端输入框的口令确认，不是真正的加密权限校验（懂技术的人翻
+// 网页源代码能看到这串密码）——它防的是"手滑/误删"，不是"故意绕过系统的人"。
+var DELETE_PASSWORD = "chen";
+function requireDeletePassword(actionLabel) {
+  var pwd = prompt("⚠️ 即将"+actionLabel+"，此操作不可恢复。\n请输入删除密码确认：");
+  if(pwd === null) return false; // 点了取消
+  if(pwd !== DELETE_PASSWORD) { alert("❌ 密码错误，已取消，没有删除任何数据"); return false; }
+  return true;
+}
 function canViewFinance() { return CURRENT_ROLE==="boss" || CURRENT_ROLE==="finance"; }
 function canAddFinance() { return CURRENT_ROLE==="boss"; } // 财务只读：连新增收支登记都不行，记账只能老板（或业务员卖收购车那笔特例）做
 function canEditFinance() { return CURRENT_ROLE==="boss"; }
@@ -483,7 +495,7 @@ async function toggleUserStatus(id, currentStatus, label) {
 }
 
 async function deleteUserAccount(id, label) {
-  if(!confirm("确定删除账号「"+label+"」？删除后该账号将无法登录，此操作不可恢复。")) return;
+  if(!requireDeletePassword("删除账号「"+label+"」")) return;
   var data = await apiUsersCall("/api/users/"+id, "DELETE");
   if(data) { await loadUsers(); renderUserManageBody(); }
 }
@@ -1486,7 +1498,7 @@ function renderAddForm(data) {
   h += "<div class=\"form-group\"><label>贷款金额（$）*</label><input type=\"number\" id=\"f_amount\" value=\""+(d.amount||"")+"\" placeholder=\"0\" min=\"0\" oninput=\"onScheduleFieldChange()\"></div>";
   h += "<div class=\"form-group\"><label>砍头比例（%）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">实际放款 = 贷款×(1−砍头%)</span></label><input type=\"number\" id=\"f_haircut\" value=\""+(d.haircut!==undefined?d.haircut:"9.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"window._lastEdit='haircut';onScheduleFieldChange()\"></div>";
   h += "<div class=\"form-group\"><label>实际放款（$）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">可手动覆盖</span></label><input type=\"number\" id=\"f_actual_amount\" value=\""+(d.actualAmount||"")+"\" placeholder=\"自动计算\" min=\"0\" style=\"border-color:#2e7d32\" oninput=\"window._lastEdit='actual';onScheduleFieldChange()\"></div>";
-  h += "<div class=\"form-group\"><label id=\"f_rate_label\">月利率（%）</label><input type=\"number\" id=\"f_rate\" value=\""+(d.rate!==undefined?d.rate:"1.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"window._lastEdit='haircut';onScheduleFieldChange()\"></div>";
+  h += "<div class=\"form-group\"><label id=\"f_rate_label\">月利率（%）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">合同名义利率，仅供参考，不影响下面表格的计算</span></label><input type=\"number\" id=\"f_rate\" value=\""+(d.rate!==undefined?d.rate:"1.5")+"\" step=\"0.1\" min=\"0\" max=\"30\" oninput=\"window._lastEdit='haircut';onScheduleFieldChange()\"></div>";
   h += "<div class=\"form-group\"><label id=\"f_term_label\">贷款期限（期）<span style=\"font-size:11px;color:var(--muted);font-weight:400\">客户续期就把这里改大，下面逐期表格会自动多出新的一期，已填的老期数不受影响</span></label><input type=\"number\" id=\"f_term\" value=\""+(d.term||3)+"\" min=\"1\" max=\"600\" step=\"1\" oninput=\"onScheduleFieldChange()\"></div>";
   h += "<div class=\"form-group\"><label>还款方式</label><select id=\"f_repay\" onchange=\"onScheduleFieldChange()\">";
   ["先息后本","等额本息","永续贷","自定义还款","实收记账"].forEach(function(v){ h += "<option value=\""+v+"\""+((d.repay===v||(v==="先息后本"&&!d.repay))?" selected":"")+">"+v+"</option>"; });
@@ -1530,7 +1542,9 @@ function toggleRateTermFields(repay) {
   var rateLbl = document.getElementById('f_rate_label'), termLbl = document.getElementById('f_term_label');
   if(rateEl) { rateEl.disabled = isActual; rateEl.style.opacity = isActual ? 0.5 : 1; }
   if(termEl) { termEl.disabled = isActual; termEl.style.opacity = isActual ? 0.5 : 1; }
-  if(rateLbl) rateLbl.innerHTML = '月利率（%）' + (isActual ? '<span style="font-size:11px;color:var(--muted);font-weight:400">实收记账模式不需要，留空即可</span>' : '');
+  if(rateLbl) rateLbl.innerHTML = isActual
+    ? '月利率（%）<span style="font-size:11px;color:var(--muted);font-weight:400">实收记账模式不需要，留空即可</span>'
+    : '月利率（%）<span style="font-size:11px;color:var(--muted);font-weight:400">合同名义利率，仅供参考，不影响下面表格的计算</span>';
   if(termLbl) termLbl.innerHTML = isActual
     ? '贷款期限<span style="font-size:11px;color:var(--muted);font-weight:400">实收记账模式不需要，回款登记里可以一直往后加期</span>'
     : '贷款期限（期）<span style="font-size:11px;color:var(--muted);font-weight:400">客户续期就把这里改大，下面逐期表格会自动多出新的一期，已填的老期数不受影响</span>';
@@ -2008,7 +2022,7 @@ function editLoan(id) {
 
 async function deleteLoan(id) {
   if(!canDelete()) { alert("⛔ 只有老板账号能删除"); return; }
-  if(!confirm("确定删除编号 "+id+" 的记录？")) return;
+  if(!requireDeletePassword("删除编号 "+id+" 的记录")) return;
   _loans = _loans.filter(function(l){ return l.id!==id; });
   saveLoans(); filterList();
 }
@@ -2122,7 +2136,7 @@ function editAcquired(id) {
 
 async function deleteAcquired(id) {
   if(!canDelete()) { alert("⛔ 只有老板账号能删除"); return; }
-  if(!confirm("确定删除收购车辆编号 "+id+" 的记录？关联的销售利润流水也会一并删除。")) return;
+  if(!requireDeletePassword("删除收购车辆编号 "+id+" 的记录（关联的销售利润流水也会一并删除）")) return;
   _loans = _loans.filter(function(l){ return l.id!==id; });
   _financeRecords = _financeRecords.filter(function(r){ return r.loanId!==id; });
   saveLoans(); saveFinance(); renderAcquiredList();
@@ -2486,7 +2500,7 @@ async function saveFinanceRecord(type) {
 
 async function deleteFinanceRecord(id) {
   if(!canDelete()) { alert("⛔ 只有老板账号能删除"); return; }
-  if(!confirm("确定删除此记录？")) return;
+  if(!requireDeletePassword("删除这条财务记录")) return;
   _financeRecords = _financeRecords.filter(function(r){ return r.id!==id; });
   saveFinance();
   renderFinanceForm(_financeRecords.length>0 ? _financeRecords[0].type : "income");
