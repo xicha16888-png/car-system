@@ -223,6 +223,7 @@ html,body{overflow:auto;height:auto}
   <div class="mob-divider"></div>
   <div class="mob-more-item" onclick="closeMobMore();nav('import')"><span class="mmi">📥</span>批量导入</div>
   <div class="mob-more-item" onclick="closeMobMore();nav('user_manage')"><span class="mmi">👥</span>账号管理</div>
+  <div class="mob-more-item" onclick="closeMobMore();nav('oplog')"><span class="mmi">📝</span>操作日志</div>
   <div class="mob-more-item" onclick="closeMobMore();doBackup()"><span class="mmi">💾</span>备份数据</div>
   <div class="mob-more-item" onclick="closeMobMore();doRestore()"><span class="mmi">📂</span>恢复数据</div>
 </div>
@@ -499,6 +500,68 @@ async function deleteUserAccount(id, label) {
   var data = await apiUsersCall("/api/users/"+id, "DELETE");
   if(data) { await loadUsers(); renderUserManageBody(); }
 }
+
+// ══ 操作日志（老板专属）══ 2026-09 新增：谁在什么时候新增/编辑/删除了哪条贷款、
+// 收购车辆、财务记录，或者动了账号管理——只读展示，数据全部由服务器自动记录，
+// 前端这里不做任何写入。
+var _oplog = [];
+var _oplogFilter = {dataKey:"", action:"", username:""};
+var OPLOG_ACTION_LABEL = {add:"➕ 新增", edit:"✏️ 编辑", delete:"🗑️ 删除"};
+var OPLOG_KEY_LABEL = {car_loans:"贷款/收购车辆", car_finance:"财务记录", car_users:"账号管理"};
+async function renderOplog() {
+  if(!isBoss()) { alert("⛔ 只有老板能查看操作日志"); nav("home"); return; }
+  document.getElementById('mainContent').innerHTML = '<div class="card" style="text-align:center;padding:50px;color:var(--muted)">加载中...</div>';
+  var data = await apiUsersCall("/api/oplog");
+  _oplog = (data && data.log) || [];
+  renderOplogBody();
+}
+function renderOplogBody() {
+  var h='';
+  h+='<div class="page-header"><div class="page-title">📝 操作日志</div><div class="page-sub">系统自动记录，谁在什么时候新增/编辑/删除了什么，只读，最近 '+OPLOG_MAX_DISPLAY_NOTE+'条</div></div>';
+
+  var operators = [];
+  _oplog.forEach(function(o){ if(operators.indexOf(o.username)===-1) operators.push(o.username); });
+
+  h+='<div class="search-row">';
+  h+='<select id="ol_dataKey" onchange="onOplogFilterChange()"><option value="">全部类型</option><option value="car_loans">贷款/收购车辆</option><option value="car_finance">财务记录</option><option value="car_users">账号管理</option></select>';
+  h+='<select id="ol_action" onchange="onOplogFilterChange()"><option value="">全部动作</option><option value="add">新增</option><option value="edit">编辑</option><option value="delete">删除</option></select>';
+  h+='<select id="ol_username" onchange="onOplogFilterChange()"><option value="">全部操作人</option>'+operators.map(function(u){return '<option value="'+u+'">'+u+'</option>';}).join('')+'</select>';
+  h+='<button class="btn btn-outline" onclick="renderOplog()">🔄 刷新</button>';
+  h+='</div>';
+
+  var list = _oplog.filter(function(o){
+    if(_oplogFilter.dataKey && o.dataKey!==_oplogFilter.dataKey) return false;
+    if(_oplogFilter.action && o.action!==_oplogFilter.action) return false;
+    if(_oplogFilter.username && o.username!==_oplogFilter.username) return false;
+    return true;
+  });
+
+  h+='<div class="card"><div class="table-wrap"><table><thead><tr><th>时间</th><th>操作人</th><th>类型</th><th>动作</th><th>对象</th><th>内容</th></tr></thead><tbody>';
+  if(list.length===0) { h+='<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--muted)">暂无记录</td></tr>'; }
+  list.slice(0,300).forEach(function(o){
+    h+='<tr>';
+    h+='<td style="font-size:12px;color:var(--muted);white-space:nowrap">'+(o.time?o.time.replace("T"," ").slice(0,19):"—")+'</td>';
+    h+='<td>'+(o.displayName||o.username||"—")+' <span style="font-size:11px;color:var(--muted)">('+(ROLE_LABEL[o.role]||o.role||"")+')</span></td>';
+    h+='<td style="font-size:12px">'+(OPLOG_KEY_LABEL[o.dataKey]||o.dataKey||"—")+'</td>';
+    h+='<td>'+(OPLOG_ACTION_LABEL[o.action]||o.action||"—")+'</td>';
+    h+='<td style="font-family:monospace;font-size:12px">'+(o.targetId||"—")+'</td>';
+    h+='<td style="font-size:12px;color:var(--muted)">'+(o.summary||"")+'</td>';
+    h+='</tr>';
+  });
+  h+='</tbody></table></div>'+(list.length>300?'<div style="padding:10px 14px;font-size:12px;color:var(--muted)">共'+list.length+'条，只显示最近300条，可用上面的筛选缩小范围</div>':'')+'</div>';
+
+  document.getElementById('mainContent').innerHTML = h;
+  var dkEl=document.getElementById('ol_dataKey'); if(dkEl) dkEl.value=_oplogFilter.dataKey;
+  var acEl=document.getElementById('ol_action'); if(acEl) acEl.value=_oplogFilter.action;
+  var unEl=document.getElementById('ol_username'); if(unEl) unEl.value=_oplogFilter.username;
+}
+function onOplogFilterChange() {
+  _oplogFilter.dataKey = document.getElementById('ol_dataKey')?.value||"";
+  _oplogFilter.action = document.getElementById('ol_action')?.value||"";
+  _oplogFilter.username = document.getElementById('ol_username')?.value||"";
+  renderOplogBody();
+}
+var OPLOG_MAX_DISPLAY_NOTE = "3000"; // 跟服务器 OPLOG_MAX 保持一致的提示文案，纯展示用
 
 function buildMobNav() {
   var map={home:"mn_home",add:"mn_add",list:"mn_list",overdue:"mn_overdue"};
@@ -861,6 +924,74 @@ async function loadAllData() {
     _financeRecords = [];
   }
 }
+
+// ══ 2026-09 新增：所有"新增/编辑/删除一条记录"的保存动作都改走这里，不再直接
+// 把本地内存里的 _loans/_financeRecords 整个数组原样提交 ══
+//
+// 背景（"刚刚业务员录入的单子怎么不见了"的真正原因）：以前的保存逻辑是——本地内存里
+// 存的那份数组是什么样，保存的时候就原样整个提交、整体覆盖数据库。如果一个账号（尤其
+// 是老板账号，权限最大）打开页面之后一段时间没刷新，本地这份数据其实已经"过时"了——
+// 这期间业务员可能新增了合同。这时候老板哪怕只是去点了个"编辑"改一个字段再保存，
+// 提交的也是那份"过时的完整数组"（不包含业务员这期间新增的合同），数据库里那份
+// "整体被覆盖"，业务员刚录的单子就跟着被冲掉了，看起来就像凭空消失。
+//
+// 修复：改成"保存前先重新问数据库要一份最新的数据，这次要做的修改（加一条/改一条/
+// 删一条）在这份最新数据基础上做，再把结果提交上去"——不管本地缓存是不是过时的，
+// 提交的永远是"最新数据 + 这次要做的改动"，不会把期间别人新增的记录顶掉。
+//
+// applyLoans / applyFinance：函数 (freshArr) => 修改后的数组；返回什么就提交什么。
+// 不需要动某个key就传 null/不传，那个key完全不会出现在这次提交里。
+// _retried：内部用，业务代码调用时不要传这个参数
+async function mutateData(applyLoans, applyFinance, _retried) {
+  var fresh;
+  try {
+    setSyncStatus("syncing");
+    var getRes = await fetch("/api/data", {headers: authHeaders()});
+    if(getRes.status===401) { setSyncStatus("error"); showLoginScreen("登录已过期，请重新登录"); return {ok:false}; }
+    fresh = await getRes.json();
+  } catch(e) {
+    setSyncStatus("error");
+    alert("⚠️ 网络异常，无法获取最新数据，请检查网络后重试再保存");
+    return {ok:false};
+  }
+  var freshLoans = fresh.car_loans || [];
+  var freshFinance = fresh.car_finance || [];
+  var payload = {};
+  if(applyLoans) { freshLoans = applyLoans(freshLoans) || freshLoans; payload.car_loans = freshLoans; }
+  if(applyFinance) { freshFinance = applyFinance(freshFinance) || freshFinance; payload.car_finance = freshFinance; }
+  try {
+    var res = await fetch("/api/data", {
+      method:"POST",
+      headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
+      body:JSON.stringify(payload)
+    });
+    if(res.status===401) { setSyncStatus("error"); showLoginScreen("登录已过期，请重新登录"); return {ok:false}; }
+    if(res.status===403) {
+      var d=await res.json().catch(function(){return{};});
+      // "无权删除/修改/新增记录"这几种，十有八九是因为两次GET之间数据库又被别人（哪怕就
+      // 差一两秒）改了点别的东西——不是真的越权，重新拉一次最新数据、把这次的修改重新
+      // 叠加上去再试一次，通常就直接成功了，业务员不用管、也不用重新点一次保存。
+      // 只自动重试一次，真出问题（比如账号确实没权限）第二次还是会失败，照常提示。
+      var staleClassMsgs = ["无权删除记录","无权修改已有记录","无权新增记录"];
+      if(!_retried && staleClassMsgs.indexOf(d.message)!==-1) {
+        return await mutateData(applyLoans, applyFinance, true);
+      }
+      setSyncStatus("error");
+      alert("❌ 无权限："+(d.message||"操作被拒绝，请刷新页面重新加载最新数据"));
+      return {ok:false};
+    }
+    if(!res.ok) { setSyncStatus("error"); return {ok:false}; }
+    setSyncStatus("ok");
+    // 保存成功后，本地缓存同步为"这次实际提交上去的结果"，而不是本地旧数组，
+    // 这样界面上立刻看到的数据也是最新、包含别人新增内容的
+    if(applyLoans) _loans = freshLoans;
+    if(applyFinance) _financeRecords = freshFinance;
+    return {ok:true, loans:freshLoans, finance:freshFinance};
+  } catch(e) {
+    setSyncStatus("error");
+    return {ok:false};
+  }
+}
 function formatDate(d) { if(!d) return "-"; var dt=new Date(d); return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0"); }
 function formatMoney(n) { return "¥"+Number(n).toLocaleString(); }
 // 砍头息 = 贷款金额 − 实际放款金额（精确，直接用两个原始数字相减）；
@@ -954,13 +1085,16 @@ function loanEffectiveMonthlyRate(l) {
 function isAcquired(l) { return !!(l && l.assetType === "acquired"); }
 function loanRecords() { return _loans.filter(function(l){ return !isAcquired(l); }); }
 function acquiredRecords() { return _loans.filter(isAcquired); }
-function genAcquiredId() {
+// 参数 arr 可选：传入哪份数组就按哪份数组算编号（mutateData 场景下要传"刚拉到的最新数组"，
+// 不传就退回用本地 _loans——避免本地数据过时时，编号跟别人这期间新增的记录撞车）
+function genAcquiredId(arr) {
+  arr = arr || _loans;
   var d = new Date();
   var prefix = "AQ"+d.getFullYear()+String(d.getMonth()+1).padStart(2,"0");
   var n = 1;
-  for(var i=0;i<_loans.length;i++) {
-    if(_loans[i].id && _loans[i].id.startsWith(prefix)) {
-      var num = parseInt(_loans[i].id.slice(-3)) || 0;
+  for(var i=0;i<arr.length;i++) {
+    if(arr[i].id && arr[i].id.startsWith(prefix)) {
+      var num = parseInt(arr[i].id.slice(-3)) || 0;
       if(num >= n) n = num+1;
     }
   }
@@ -1099,13 +1233,15 @@ function statusHtml(s) {
   return "<span class=\"badge "+r[1]+"\">"+r[0]+"</span>";
 }
 
-function genId() {
+// 参数 arr 可选，同 genAcquiredId() 的注释
+function genId(arr) {
+  arr = arr || _loans;
   var d = new Date();
   var prefix = "CL"+d.getFullYear()+String(d.getMonth()+1).padStart(2,"0");
   var n = 1;
-  for(var i=0;i<_loans.length;i++) {
-    if(_loans[i].id && _loans[i].id.startsWith(prefix)) {
-      var num = parseInt(_loans[i].id.slice(-3)) || 0;
+  for(var i=0;i<arr.length;i++) {
+    if(arr[i].id && arr[i].id.startsWith(prefix)) {
+      var num = parseInt(arr[i].id.slice(-3)) || 0;
       if(num >= n) n = num+1;
     }
   }
@@ -1138,6 +1274,7 @@ function buildSidebar() {
     items.push({sec:"系统设置"});
     items.push({id:"data_check", icon:"🔍", label:"数据体检"});
     items.push({id:"user_manage", icon:"👥", label:"账号管理"});
+    items.push({id:"oplog", icon:"📝", label:"操作日志"});
     items.push({id:"backup", icon:"💾", label:"备份数据"});
     items.push({id:"restore", icon:"📂", label:"恢复数据"});
   }
@@ -1156,7 +1293,7 @@ function buildSidebar() {
 // ══ 页面级权限校验（前端拦截，真正的数据保护在服务器）══
 var PAGE_REQUIRES = {
   add:"writeLoans", acquired_add:"writeLoans", import:"writeLoans", repay_collect:"writeLoans",
-  backup:"boss", restore:"boss", user_manage:"boss", data_check:"boss",
+  backup:"boss", restore:"boss", user_manage:"boss", data_check:"boss", oplog:"boss",
   finance_pnl:"viewFinance", settlement:"viewFinance", finance_cashflow:"viewFinance",
   haircut_detail:"viewFinance", interest_detail:"viewFinance", profit_detail:"viewFinance",
   finance_income:"viewFinance", finance_expense:"viewFinance"
@@ -1196,6 +1333,7 @@ function nav(page) {
   else if(page==="settlement") renderSettlement();
   else if(page==="user_manage") renderUserManage();
   else if(page==="data_check") renderDataCheck();
+  else if(page==="oplog") renderOplog();
 }
 
 // ══ 首页数字点进去看明细 ══
@@ -1853,15 +1991,22 @@ async function saveLoan() {
     date:document.getElementById("f_date")?.value||new Date().toISOString().slice(0,10),
     note:document.getElementById("f_note")?.value.trim()||""
   };
-  if(_editId) {
-    for(var i=0;i<_loans.length;i++) { if(_loans[i].id===_editId) { for(var k in data) _loans[i][k]=data[k]; break; } }
-    alert("✅ 贷款信息已更新");
-  } else {
-    data.id = genId();
-    _loans.unshift(data);
-    alert("✅ 新增贷款成功 编号："+data.id);
-  }
-  saveLoans(); _editId=null; nav("list");
+  var editId = _editId;
+  var newIdForAlert = null;
+  await mutateData(function(freshLoans) {
+    if(editId) {
+      var found = false;
+      for(var i=0;i<freshLoans.length;i++) { if(freshLoans[i].id===editId) { for(var k in data) freshLoans[i][k]=data[k]; found=true; break; } }
+      if(!found) { data.id = editId; freshLoans.unshift(data); } // 极端情况：编辑期间这条记录被别人删了，按原ID补回去
+    } else {
+      data.id = genId(freshLoans);
+      newIdForAlert = data.id;
+      freshLoans.unshift(data);
+    }
+    return freshLoans;
+  }, null);
+  alert(editId ? "✅ 贷款信息已更新" : "✅ 新增贷款成功 编号："+newIdForAlert);
+  _editId=null; nav("list");
 }
 
 
@@ -2022,8 +2167,10 @@ function editLoan(id) {
 async function deleteLoan(id) {
   if(!canDelete()) { alert("⛔ 只有老板账号能删除"); return; }
   if(!requireDeletePassword("删除编号 "+id+" 的记录")) return;
-  _loans = _loans.filter(function(l){ return l.id!==id; });
-  saveLoans(); filterList();
+  await mutateData(function(freshLoans) {
+    return freshLoans.filter(function(l){ return l.id!==id; });
+  }, null);
+  filterList();
 }
 
 // ══════════════════════════════════════════════
@@ -2116,16 +2263,23 @@ async function saveAcquired() {
     date: document.getElementById("a_date")?.value||new Date().toISOString().slice(0,10),
     note: document.getElementById("a_note")?.value.trim()||""
   };
-  if(_editAcquiredId) {
-    for(var i=0;i<_loans.length;i++) { if(_loans[i].id===_editAcquiredId) { for(var k in data) _loans[i][k]=data[k]; break; } }
-    alert("✅ 收购车辆信息已更新");
-  } else {
-    data.id = genAcquiredId();
-    data.status = "in_stock";
-    _loans.unshift(data);
-    alert("✅ 新增收购车辆成功 编号："+data.id);
-  }
-  saveLoans(); _editAcquiredId=null; nav("acquired_list");
+  var editAcquiredId = _editAcquiredId;
+  var newIdForAlert = null;
+  await mutateData(function(freshLoans) {
+    if(editAcquiredId) {
+      var found = false;
+      for(var i=0;i<freshLoans.length;i++) { if(freshLoans[i].id===editAcquiredId) { for(var k in data) freshLoans[i][k]=data[k]; found=true; break; } }
+      if(!found) { data.id = editAcquiredId; data.status = data.status || "in_stock"; freshLoans.unshift(data); }
+    } else {
+      data.id = genAcquiredId(freshLoans);
+      data.status = "in_stock";
+      newIdForAlert = data.id;
+      freshLoans.unshift(data);
+    }
+    return freshLoans;
+  }, null);
+  alert(editAcquiredId ? "✅ 收购车辆信息已更新" : "✅ 新增收购车辆成功 编号："+newIdForAlert);
+  _editAcquiredId=null; nav("acquired_list");
 }
 
 function editAcquired(id) {
@@ -2136,9 +2290,12 @@ function editAcquired(id) {
 async function deleteAcquired(id) {
   if(!canDelete()) { alert("⛔ 只有老板账号能删除"); return; }
   if(!requireDeletePassword("删除收购车辆编号 "+id+" 的记录（关联的销售利润流水也会一并删除）")) return;
-  _loans = _loans.filter(function(l){ return l.id!==id; });
-  _financeRecords = _financeRecords.filter(function(r){ return r.loanId!==id; });
-  saveLoans(); saveFinance(); renderAcquiredList();
+  await mutateData(function(freshLoans) {
+    return freshLoans.filter(function(l){ return l.id!==id; });
+  }, function(freshFinance) {
+    return freshFinance.filter(function(r){ return r.loanId!==id; });
+  });
+  renderAcquiredList();
 }
 
 function renderSellForm(id) {
@@ -2166,23 +2323,32 @@ async function confirmSell(id) {
   var extraCost = parseFloat(document.getElementById("s_extra")?.value)||0;
   var saleDate = document.getElementById("s_date")?.value||new Date().toISOString().slice(0,10);
   var note = document.getElementById("s_note")?.value.trim()||"";
-  a.status = "sold";
-  a.saleAmount = saleAmount;
-  a.extraCost = extraCost;
-  a.saleDate = saleDate;
-  var profit = saleAmount - (a.amount||0) - extraCost;
-  // 售出后自动生成一笔"其他收入"财务记录，自动计入净利润（未售出前不产生任何利润）
-  _financeRecords = _financeRecords.filter(function(r){ return !(r.loanId===id && r.category==='收购车辆销售利润'); });
-  _financeRecords.unshift({
-    id: "F"+Date.now(),
-    type: "income",
-    amount: profit,
-    category: "收购车辆销售利润",
-    date: saleDate,
-    loanId: id,
-    note: "收购车辆售出："+(a.brand||'')+' '+(a.plate||'')+"，成交价"+formatMoney(saleAmount)+(extraCost?"，额外支出"+formatMoney(extraCost):"")+(note?"。"+note:"")
+  var profit = 0;
+  // 注意：状态变更（status/saleAmount等）要打在"最新拉下来的那份数组里的那条记录"上，
+  // 不能打在页面打开时缓存的 a 上——a 可能是过时的（见 mutateData 的说明）
+  await mutateData(function(freshLoans) {
+    var fa = freshLoans.find(function(l){ return l.id===id; });
+    if(!fa) return freshLoans; // 理论上不会发生：记录在此期间被删了
+    fa.status = "sold";
+    fa.saleAmount = saleAmount;
+    fa.extraCost = extraCost;
+    fa.saleDate = saleDate;
+    profit = saleAmount - (fa.amount||0) - extraCost;
+    return freshLoans;
+  }, function(freshFinance) {
+    // 售出后自动生成一笔"其他收入"财务记录，自动计入净利润（未售出前不产生任何利润）
+    freshFinance = freshFinance.filter(function(r){ return !(r.loanId===id && r.category==='收购车辆销售利润'); });
+    freshFinance.unshift({
+      id: "F"+Date.now(),
+      type: "income",
+      amount: profit,
+      category: "收购车辆销售利润",
+      date: saleDate,
+      loanId: id,
+      note: "收购车辆售出："+(a.brand||'')+' '+(a.plate||'')+"，成交价"+formatMoney(saleAmount)+(extraCost?"，额外支出"+formatMoney(extraCost):"")+(note?"。"+note:"")
+    });
+    return freshFinance;
   });
-  await saveLoans(); await saveFinance();
   alert("✅ 已标记售出，利润 "+formatMoney(profit)+" 已自动计入净利润");
   nav("acquired_list");
 }
@@ -2386,15 +2552,23 @@ async function saveRepayCollect() {
   if(interest>0) newRecs.push({ id:"F"+stamp+"1", type:"income", amount:interest, category:"利息收入", date:date, loanId:loanId, period:period, note:note });
   if(principal>0) newRecs.push({ id:"F"+stamp+"2", type:"income", amount:principal, category:"本金回收", date:date, loanId:loanId, period:period, note:note });
   if(latefee>0) newRecs.push({ id:"F"+stamp+"3", type:"income", amount:latefee, category:"滞纳金", date:date, loanId:loanId, period:period, note:note });
-  newRecs.forEach(function(r){ _financeRecords.unshift(r); });
-  await saveFinance();
+  var financeResult = await mutateData(null, function(freshFinance) {
+    newRecs.forEach(function(r){ freshFinance.unshift(r); });
+    return freshFinance;
+  });
+  if(!financeResult.ok) { alert("⚠️ 回款保存失败，请检查网络后重试"); return; }
 
+  // mutateData 保存成功后，_financeRecords 已经同步为"最新数据+刚登记的这几条"，
+  // 这里算剩余本金用的是这份最新数据，不会因为本地过时而算错
   var remain = loanRemainingPrincipal(loan);
   var closedNow = false;
   if(remain<=0 && loan.status!=='closed') {
     if(confirm("该合同本金已全部收回（剩余$0），是否标记合同为「已结清」？")) {
-      loan.status = 'closed';
-      await saveLoans();
+      await mutateData(function(freshLoans) {
+        var fl = freshLoans.find(function(l){ return l.id===loanId; });
+        if(fl) fl.status = 'closed';
+        return freshLoans;
+      }, null);
       closedNow = true;
     }
   }
@@ -2491,8 +2665,10 @@ async function saveFinanceRecord(type) {
     loanId: document.getElementById("fi_loanId")?.value.trim()||"",
     note: document.getElementById("fi_note")?.value.trim()||""
   };
-  _financeRecords.unshift(rec);
-  saveFinance();
+  await mutateData(null, function(freshFinance) {
+    freshFinance.unshift(rec);
+    return freshFinance;
+  });
   alert("✅ "+(type==="income"?"收入":"支出")+"记录已保存");
   renderFinanceForm(type);
 }
@@ -2500,8 +2676,9 @@ async function saveFinanceRecord(type) {
 async function deleteFinanceRecord(id) {
   if(!canDelete()) { alert("⛔ 只有老板账号能删除"); return; }
   if(!requireDeletePassword("删除这条财务记录")) return;
-  _financeRecords = _financeRecords.filter(function(r){ return r.id!==id; });
-  saveFinance();
+  await mutateData(null, function(freshFinance) {
+    return freshFinance.filter(function(r){ return r.id!==id; });
+  });
   renderFinanceForm(_financeRecords.length>0 ? _financeRecords[0].type : "income");
 }
 
