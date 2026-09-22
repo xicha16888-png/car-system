@@ -1551,7 +1551,6 @@ function renderCustomScheduleUI(d) {
   var rate   = parseFloat(document.getElementById("f_rate")?.value)||0;
   var term   = parseInt(document.getElementById("f_term")?.value)||1;
   var repay  = document.getElementById("f_repay")?.value||"先息后本";
-  var isCustomType = repay === "自定义还款";
   var loanDate = document.getElementById("f_date")?.value || new Date().toISOString().slice(0,10);
   var actEl = document.getElementById("f_actual_amount");
   var hcEl  = document.getElementById("f_haircut");
@@ -1566,12 +1565,12 @@ function renderCustomScheduleUI(d) {
     if(actEl && amount > 0) actEl.value = actual || "";
   }
   if(!amount) { box.style.display="none"; return; }
-  // 先息后本/等额本息/永续贷这三种，没有已保存的真实数据时，拿公式现算一版当默认值
-  var formulaSchedule = isCustomType ? [] : calcRepay(amount, rate, term, repay, haircut).schedule;
+  // 不管哪种还款方式，没有已保存的真实数据时一律留空——业务员自己逐期填，
+  // 系统不代填任何数字（老板明确要求："我要业务员自己填，不要你系统填"）
   // 每期数据：优先用当前输入框里已经填了的值（改期数时不清空已填的），输入框还
   // 不存在时（刚切到这个还款方式或刚打开编辑页）用合同已保存的 d.customSchedule
   // 兜底（新旧两种格式都认：对象{principal,interest,dueDate} 或早期的纯数字本金），
-  // 都没有保存过的话，自定义还款留空，其他三种用公式算出的默认值
+  // 都没有保存过的话，留空，等业务员自己填
   var rows = [];
   for(var i=1;i<=term;i++) {
     var pEl = document.getElementById('cs_p_'+i), iEl = document.getElementById('cs_i_'+i), dEl = document.getElementById('cs_d_'+i);
@@ -1584,8 +1583,7 @@ function renderCustomScheduleUI(d) {
       } else if(saved != null && typeof saved !== "object") {
         rows.push({ principal: saved, interest: 0, dueDate: defaultDueDate(loanDate,i) }); // 旧格式，利息留给业务员自己填/用批量按钮
       } else {
-        var fd = formulaSchedule[i-1];
-        rows.push({ principal: fd ? fd.principal : 0, interest: fd ? fd.interest : 0, dueDate: defaultDueDate(loanDate,i) });
+        rows.push({ principal: 0, interest: 0, dueDate: defaultDueDate(loanDate,i) });
       }
     }
   }
@@ -1602,12 +1600,8 @@ function renderCustomScheduleUI(d) {
       "<td><input type=\"number\" id=\"cs_i_"+i+"\" value=\""+(rw.interest||"")+"\" min=\"0\" step=\"0.01\" placeholder=\"0\" style=\"width:100px;padding:4px 6px;border:1px solid #cfd8dc;border-radius:4px;font-family:inherit\" oninput=\"updateCustomScheduleTotals()\"></td>"+
       "<td id=\"cs_total_"+i+"\" style=\"font-weight:600\">$"+(rw.principal+rw.interest).toFixed(2)+"</td></tr>";
   }
-  var headerText = isCustomType
-    ? "📊 自定义还款计划——按纸质合同逐期填到期日/本金/利息，跟系统公式无关，填多少算多少"
-    : "📊 "+repay+"还款计划——下面已经按当前利率/期数算好一版参考值，业务员可以直接用，也可以逐期改成实际收到/约定的数字";
-  var quickBtns = isCustomType
-    ? "<button type=\"button\" class=\"btn btn-sm btn-outline\" onclick=\"quickFillCustomInterest()\">⚡ 按月利率（"+rate+"%）批量填利息</button><button type=\"button\" class=\"btn btn-sm btn-outline\" onclick=\"quickFillCustomDates()\">📅 按放款日逐月重填到期日</button>"
-    : "<button type=\"button\" class=\"btn btn-sm btn-outline\" onclick=\"resetScheduleToFormula()\">🔄 按公式重新算一遍（会覆盖当前已填内容）</button><button type=\"button\" class=\"btn btn-sm btn-outline\" onclick=\"quickFillCustomDates()\">📅 按放款日逐月重填到期日</button>";
+  var headerText = "📊 "+repay+"还款计划——逐期填到期日/本金/利息，业务员自己填，系统不代填，填多少算多少";
+  var quickBtns = "<button type=\"button\" class=\"btn btn-sm btn-outline\" onclick=\"quickFillCustomInterest()\">⚡ 按月利率（"+rate+"%）批量填利息</button><button type=\"button\" class=\"btn btn-sm btn-outline\" onclick=\"quickFillCustomDates()\">📅 按放款日逐月重填到期日</button>";
   box.style.display = "block";
   box.innerHTML =
     "<div style=\"font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px\">"+headerText+"</div>"+
@@ -1620,22 +1614,6 @@ function renderCustomScheduleUI(d) {
     "<div style=\"overflow-x:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><thead><tr style=\"background:#f5f5f5\"><th style=\"padding:6px 8px;text-align:left\">期数</th><th style=\"padding:6px 8px;text-align:left\">到期日</th><th style=\"padding:6px 8px;text-align:left\">应还本金</th><th style=\"padding:6px 8px;text-align:left\">应还利息</th><th style=\"padding:6px 8px;text-align:left\">合计</th></tr></thead><tbody>"+
     rowsHtml + "</tbody></table></div>"+
     "<div style=\"font-size:11px;color:var(--muted);margin-top:8px\">💡 本金/利息合计不需要非要对平才能保存——客户还没还完、或者是分批补录的，都可以先保存，之后回到这里继续补填，或者在「回款登记」里逐期登记实际收款。</div>";
-}
-// 把当前逐期表格重置回公式算出来的参考值（业务员改乱了想重来一遍时用）
-function resetScheduleToFormula() {
-  var amount = parseFloat(document.getElementById("f_amount")?.value)||0;
-  var rate   = parseFloat(document.getElementById("f_rate")?.value)||0;
-  var term   = parseInt(document.getElementById("f_term")?.value)||1;
-  var repay  = document.getElementById("f_repay")?.value||"先息后本";
-  var haircut = parseFloat(document.getElementById("f_haircut")?.value)||0;
-  var res = calcRepay(amount, rate, term, repay, haircut);
-  for(var i=1;i<=term;i++) {
-    var s = res.schedule[i-1] || {principal:0,interest:0};
-    var pEl = document.getElementById('cs_p_'+i), iEl = document.getElementById('cs_i_'+i);
-    if(pEl) pEl.value = s.principal || "";
-    if(iEl) iEl.value = s.interest || "";
-  }
-  updateCustomScheduleTotals();
 }
 // 到期日默认值：放款日起，按第N期往后推N个月（只是给业务员一个起点，改成合同上写的真实日期即可）
 function defaultDueDate(loanDate, period) {
