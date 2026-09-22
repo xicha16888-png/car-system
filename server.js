@@ -355,7 +355,7 @@ async function persistOplog() {
 function summarizeLoanRecord(r) {
   if (!r) return '';
   if (r.assetType === 'acquired') return '收购车辆 ' + (r.plate || '') + (r.brand ? ' ' + r.brand : '');
-  return (r.name || '') + ' · ' + (r.plate || '') + ' · ' + (r.amount != null ? '$' + r.amount : '');
+  return (r.name || '') + ' · ' + (r.plate || '') + ' · ' + (r.amount != null ? '$' + r.amount : '') + (r.agent ? '（经办：' + r.agent + '）' : '');
 }
 function summarizeFinanceRecord(r) {
   if (!r) return '';
