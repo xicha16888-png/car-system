@@ -244,6 +244,7 @@ html,body{overflow:auto;height:auto}
 var _loans = [];
 var _editId = null;
 var _collapsedMonths = {}; // 记录折叠状态
+var _closedSectionOpen = false; // "已结清"折叠区默认收起，点了才展开
 var _currentNav = "home";
 var _financeRecords = [];
 var _syncStatus = "idle";
@@ -2021,7 +2022,7 @@ function renderList() {
   var closed  = _lr.filter(function(l){return l.status==='closed';}).length;
   var pending = _lr.filter(function(l){return l.status==='pending';}).length;
   var h='';
-  h+='<div class="page-header"><div class="page-title">🚗 贷款查询</div><div class="page-sub">共 '+_lr.length+' 笔合同</div></div>';
+  h+='<div class="page-header"><div class="page-title">🚗 贷款查询</div><div class="page-sub">共 '+_lr.length+' 笔合同（其中已结清 '+closed+' 笔，默认收在下面折叠区，不占日常查询）</div></div>';
   // 统计栏
   h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">';
   h+='<div style="background:#e8f5e9;border-radius:10px;padding:10px 12px;cursor:pointer;border:2px solid transparent" onclick="setStatusFilter(\'active\')" id="sc_active"><div style="font-size:18px;font-weight:700;color:#2e7d32">'+active+'</div><div style="font-size:11px;color:#546e7a">还款中</div></div>';
@@ -2081,6 +2082,12 @@ function toggleMonth(mk) {
   if(arrow) arrow.textContent = _collapsedMonths[mk] ? '▶' : '▼';
 }
 
+// 2026-09 改版："已结清"的合同不再跟还没结清的混在一起显示——日常查询列表
+// 默认只看还在走的合同（审核中/还款中/逾期），已结清的收进列表最下面一个单独的
+// 折叠区，默认收起，点一下才展开看，不占日常查询的视线、也不会让统计数字
+// （笔数/贷款合计/月息合计）被一堆已经结清、不再需要跟进的旧合同稀释。
+// 如果在上面"状态"筛选里专门选"已结清"，就还是按老样子，把匹配的已结清合同直接
+// 显示在主列表（这时候折叠区不出现，因为已经在专门看已结清的了）。
 function filterList() {
   var mobile=window.innerWidth<=768;
   var q=(document.getElementById('searchInput')?.value||'').trim().toLowerCase();
@@ -2088,33 +2095,74 @@ function filterList() {
   var m=document.getElementById('monthFilter')?.value||'';
   var rp=document.getElementById('repayFilter')?.value||'';
   var ag=document.getElementById('agentFilter')?.value||'';
-  var filtered=loanRecords().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
-  if(q) filtered=filtered.filter(function(l){return (l.name||'').toLowerCase().indexOf(q)>=0||(l.phone||'').indexOf(q)>=0||(l.plate||'').toLowerCase().indexOf(q)>=0||(l.id||'').toLowerCase().indexOf(q)>=0||(l.agent||'').toLowerCase().indexOf(q)>=0;});
-  if(s) filtered=filtered.filter(function(l){return l.status===s;});
-  if(m) filtered=filtered.filter(function(l){return l.date&&l.date.slice(0,7)===m;});
-  if(rp) filtered=filtered.filter(function(l){return (l.repay||'等额本息')===rp;});
-  if(ag) filtered=filtered.filter(function(l){return (l.agent||'')===ag;});
+  var base=loanRecords().sort(function(a,b){ return (b.date||'').localeCompare(a.date||''); });
+  if(q) base=base.filter(function(l){return (l.name||'').toLowerCase().indexOf(q)>=0||(l.phone||'').indexOf(q)>=0||(l.plate||'').toLowerCase().indexOf(q)>=0||(l.id||'').toLowerCase().indexOf(q)>=0||(l.agent||'').toLowerCase().indexOf(q)>=0;});
+  if(m) base=base.filter(function(l){return l.date&&l.date.slice(0,7)===m;});
+  if(rp) base=base.filter(function(l){return (l.repay||'等额本息')===rp;});
+  if(ag) base=base.filter(function(l){return (l.agent||'')===ag;});
+
+  var openList, closedList;
+  if(s) {
+    // 专门选了某个状态（哪怕就是选"已结清"）：按老样子精确匹配，不额外拆分
+    openList = base.filter(function(l){return l.status===s;});
+    closedList = [];
+  } else {
+    openList = base.filter(function(l){return l.status!=='closed';});
+    closedList = base.filter(function(l){return l.status==='closed';});
+  }
+
   var result=document.getElementById('listResult'); if(!result) return;
-  if(filtered.length===0){result.innerHTML='<div style="text-align:center;padding:48px;color:var(--muted)">暂无匹配记录</div>';return;}
-  // 总金额统计
-  var totalAmt=filtered.reduce(function(s,l){return s+l.amount;},0);
-  var totalMon=filtered.reduce(function(s,l){return s+(l.monthly||0);},0);
-  result.innerHTML='<div style="font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;gap:16px">'+
-    '<span>共 <b>'+filtered.length+'</b> 笔</span>'+
+  if(openList.length===0 && closedList.length===0){result.innerHTML='<div style="text-align:center;padding:48px;color:var(--muted)">暂无匹配记录</div>';return;}
+
+  // 总金额统计——只算还没结清的这部分，已结清的不掺进日常要跟进的数字里
+  var totalAmt=openList.reduce(function(s,l){return s+l.amount;},0);
+  var totalMon=openList.reduce(function(s,l){return s+(l.monthly||0);},0);
+  var h='<div style="font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;gap:16px;flex-wrap:wrap">'+
+    '<span>共 <b>'+openList.length+'</b> 笔'+(s?'':'（不含已结清）')+'</span>'+
     '<span>贷款合计 <b style="color:#1565c0">$'+totalAmt.toLocaleString()+'</b></span>'+
     '<span>月利息合计 <b style="color:#2e7d32">$'+totalMon.toLocaleString()+'</b></span>'+
     '</div>';
+
+  if(openList.length===0) {
+    h += '<div style="text-align:center;padding:30px;color:var(--muted)">没有符合条件、还没结清的合同</div>';
+  } else {
+    h += renderLoanGroups(openList, mobile, '');
+  }
+
+  if(!s && closedList.length>0) {
+    var closedAmt = closedList.reduce(function(s,l){return s+l.amount;},0);
+    var isOpen = !!_closedSectionOpen;
+    h += '<div onclick="toggleClosedSection()" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin:18px 0 0;background:#78909c;border-radius:'+(isOpen?'8px 8px 0 0':'8px')+';color:#fff;cursor:pointer;user-select:none">';
+    h += '<span style="font-weight:700;font-size:13px"><span id="closedSectionArrow">'+(isOpen?'▼':'▶')+'</span> 📁 已结清合同（'+closedList.length+'笔）</span>';
+    h += '<span style="font-size:12px;opacity:.85">贷款合计 $'+closedAmt.toLocaleString()+'</span></div>';
+    h += '<div id="closedSectionBody" style="display:'+(isOpen?'':'none')+';margin-bottom:10px">'+renderLoanGroups(closedList, mobile, 'c_')+'</div>';
+  }
+
+  result.innerHTML = h;
+}
+function toggleClosedSection() {
+  _closedSectionOpen = !_closedSectionOpen;
+  var body = document.getElementById('closedSectionBody');
+  var arrow = document.getElementById('closedSectionArrow');
+  if(body) body.style.display = _closedSectionOpen ? '' : 'none';
+  if(arrow) arrow.textContent = _closedSectionOpen ? '▼' : '▶';
+}
+// 把一组合同按月分组渲染成表格（桌面）/卡片（手机），桌面/手机通用。keyPrefix
+// 用来给折叠状态和DOM id加个前缀（"已结清"折叠区传"c_"，正常列表传""），避免
+// 两边刚好有同名月份（比如都有"2026-07"）时，折叠状态/DOM id 互相冲突串到一起。
+function renderLoanGroups(loans, mobile, keyPrefix) {
+  var groups={}; loans.forEach(function(l){var mk=keyPrefix+((l.date||'').slice(0,7)||'未知');if(!groups[mk])groups[mk]=[];groups[mk].push(l);});
+  var mkeys=Object.keys(groups).sort().reverse();
+  var h='';
   if(mobile) {
     // ══ 手机：按月分组卡片 ══
-    var groups={}; filtered.forEach(function(l){var mk=(l.date||'').slice(0,7)||'未知';if(!groups[mk])groups[mk]=[];groups[mk].push(l);});
-    var mkeys=Object.keys(groups).sort().reverse();
-    var h='';
     mkeys.forEach(function(mk){
       var gloans=groups[mk];
       var gamt=gloans.reduce(function(s,l){return s+l.amount;},0);
       var isCollapsed = !!_collapsedMonths[mk];
+      var label = mk.slice(keyPrefix.length);
       h+='<div onclick="toggleMonth(\''+mk+'\')" style="display:flex;justify-content:space-between;align-items:center;padding:10px 8px;margin:12px 0 0;background:var(--navy);border-radius:8px;color:#fff;cursor:pointer">';
-      h+='<span style="font-weight:700;font-size:13px"><span id="ma_'+mk+'">'+(isCollapsed?'▶':'▼')+'</span> 📅 '+mk+'</span>';
+      h+='<span style="font-weight:700;font-size:13px"><span id="ma_'+mk+'">'+(isCollapsed?'▶':'▼')+'</span> 📅 '+label+'</span>';
       h+='<span style="font-size:12px;opacity:.8">'+gloans.length+'笔 · $'+gamt.toLocaleString()+'</span></div>';
       h+='<div id="mg_'+mk+'" style="display:'+(isCollapsed?'none':'')+';">';
       gloans.forEach(function(l){
@@ -2132,19 +2180,16 @@ function filterList() {
       });
       h+='</div>';
     });
-    result.innerHTML+=h;
   } else {
     // ══ 桌面：按月分组表格 ══
-    var groups={}; filtered.forEach(function(l){var mk=(l.date||'').slice(0,7)||'未知';if(!groups[mk])groups[mk]=[];groups[mk].push(l);});
-    var mkeys=Object.keys(groups).sort().reverse();
-    var h='';
     mkeys.forEach(function(mk){
       var gloans=groups[mk];
       var gamt=gloans.reduce(function(s,l){return s+l.amount;},0);
       var gmon=gloans.reduce(function(s,l){return s+(l.monthly||0);},0);
       var isCollapsed = !!_collapsedMonths[mk];
+      var label = mk.slice(keyPrefix.length);
       h+='<div onclick="toggleMonth(\''+mk+'\')" style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;margin:14px 0 0;background:var(--navy);border-radius:'+(isCollapsed?'8px':'8px 8px 0 0')+';color:#fff;cursor:pointer;user-select:none">';
-      h+='<span style="font-weight:700;font-size:13px"><span id="ma_'+mk+'">'+(isCollapsed?'▶':'▼')+'</span> 📅 '+mk+'</span>';
+      h+='<span style="font-weight:700;font-size:13px"><span id="ma_'+mk+'">'+(isCollapsed?'▶':'▼')+'</span> 📅 '+label+'</span>';
       h+='<span style="font-size:12px;opacity:.8">'+gloans.length+'笔 · 贷款$'+gamt.toLocaleString()+' · 月息$'+gmon.toFixed(0)+'</span></div>';
       h+='<div id="mg_'+mk+'" style="display:'+(isCollapsed?'none':'')+';margin-bottom:10px"><div class="card" style="padding:0;overflow:hidden;border-radius:0 0 8px 8px"><div class="table-wrap"><table><thead><tr>';
       h+='<th>#</th><th>客户姓名</th><th>手机号</th><th>车牌 / 品牌</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>月利息</th><th>实际月利率</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th>';
@@ -2169,8 +2214,8 @@ function filterList() {
       });
       h+='</tbody></table></div></div></div>';
     });
-    result.innerHTML+=h;
   }
+  return h;
 }
 
 function editLoan(id) {
