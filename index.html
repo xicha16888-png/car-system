@@ -1174,7 +1174,11 @@ function calcRepay(amount, rate, term, repay, haircut, customSchedule) {
       totalPrin += prin;
       res.schedule.push({ period:i, principal: prin, interest: intr, total: Math.round((prin+intr)*100)/100, dueDate: due });
     }
-    res.monthly = term ? Math.round((totalInt/term)*100)/100 : 0; // 展示用：平均每期利息（逐期本来就可能不一样）
+    // 展示用"月利息"：2026-09 改回——不从表格算，直接=贷款金额×合同月利率，跟表格
+    // 里逐期怎么填（哪一期结清、哪一期填0）没关系，合同利率没变，这一栏就不变。
+    // 需要反映"实际收了多少/提前结清影不影响利率"的，看下面的"实际月利率"——那个
+    // 才是要跟着表格算的数字，"月利息"这一栏老板明确要求按合同利率算，不要跟着表格波动。
+    res.monthly = flatInt;
     res.totalInterest = Math.round(totalInt*100)/100;
     res.totalRepay = Math.round((totalPrin+totalInt)*100)/100;
   } else if(repay === "先息后本") {
