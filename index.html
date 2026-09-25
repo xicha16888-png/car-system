@@ -1174,11 +1174,16 @@ function calcRepay(amount, rate, term, repay, haircut, customSchedule) {
       totalPrin += prin;
       res.schedule.push({ period:i, principal: prin, interest: intr, total: Math.round((prin+intr)*100)/100, dueDate: due });
     }
-    // 展示用"月利息"：2026-09 改回——不从表格算，直接=贷款金额×合同月利率，跟表格
-    // 里逐期怎么填（哪一期结清、哪一期填0）没关系，合同利率没变，这一栏就不变。
-    // 需要反映"实际收了多少/提前结清影不影响利率"的，看下面的"实际月利率"——那个
-    // 才是要跟着表格算的数字，"月利息"这一栏老板明确要求按合同利率算，不要跟着表格波动。
-    res.monthly = flatInt;
+    // 展示用"月利息"：老板明确要求——不套公式、不算平均，就是合同上写的那个数字。
+    // 业务员逐期手填的利息（尤其先息后本/永续贷这几种），跟"贷款金额×月利率"这个
+    // 公式算出来的数字经常对不上（月利率字段很多时候还是默认的1.5%没改，实际每期
+    // 收多少是业务员照合同直接填的）——所以直接读第1期业务员填的利息数字，原样
+    // 显示，不经过任何算式；哪怕后面某一期因为提前结清填了0，也不影响这个数字，
+    // 因为这里根本不看后面几期。只有第1期还没填过（比如刚新建、还没开始填表）时，
+    // 才退回用"贷款金额×月利率"给个参考值占位，业务员一旦填了第1期，就以填的为准。
+    var firstEntry = cs0[0];
+    var firstInterest = (firstEntry && typeof firstEntry === "object") ? (firstEntry.interest||0) : 0;
+    res.monthly = firstInterest > 0 ? Math.round(firstInterest*100)/100 : flatInt;
     res.totalInterest = Math.round(totalInt*100)/100;
     res.totalRepay = Math.round((totalPrin+totalInt)*100)/100;
   } else if(repay === "先息后本") {
