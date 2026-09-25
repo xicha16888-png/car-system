@@ -1761,10 +1761,29 @@ function renderCustomScheduleUI(d) {
       "<td><input type=\"date\" id=\"cs_d_"+i+"\" value=\""+rw.dueDate+"\" style=\"padding:4px 6px;border:1px solid #cfd8dc;border-radius:4px;font-family:inherit\" oninput=\"updateCustomScheduleTotals()\"></td>"+
       "<td><input type=\"number\" id=\"cs_p_"+i+"\" value=\""+(rw.principal||"")+"\" min=\"0\" step=\"0.01\" placeholder=\"0\" style=\"width:100px;padding:4px 6px;border:1px solid #cfd8dc;border-radius:4px;font-family:inherit\" oninput=\"updateCustomScheduleTotals()\"></td>"+
       "<td><input type=\"number\" id=\"cs_i_"+i+"\" value=\""+(rw.interest||"")+"\" min=\"0\" step=\"0.01\" placeholder=\"0\" style=\"width:100px;padding:4px 6px;border:1px solid #cfd8dc;border-radius:4px;font-family:inherit\" oninput=\"updateCustomScheduleTotals()\"></td>"+
-      "<td id=\"cs_total_"+i+"\" style=\"font-weight:600\">$"+(rw.principal+rw.interest).toFixed(2)+"</td></tr>";
+      "<td id=\"cs_total_"+i+"\" style=\"font-weight:600\">$"+(rw.principal+rw.interest).toFixed(2)+"</td>"+
+      "<td><button type=\"button\" class=\"btn btn-sm btn-outline\" style=\"white-space:nowrap\" onclick=\"settleAtPeriod("+i+")\">✅本期结清</button></td></tr>";
   }
   var headerText = "📊 "+repay+"还款计划——逐期填到期日/本金/利息，业务员自己填，系统不代填，填多少算多少";
   var quickBtns = "<button type=\"button\" class=\"btn btn-sm btn-outline\" onclick=\"quickFillCustomInterest()\">⚡ 按月利率（"+rate+"%）批量填利息</button><button type=\"button\" class=\"btn btn-sm btn-outline\" onclick=\"quickFillCustomDates()\">📅 按放款日逐月重填到期日</button><button type=\"button\" class=\"btn btn-sm btn-outline\" onclick=\"addOneMorePeriod()\">➕ 客户续期，增加一期</button>";
+  // ══ 提前还款覆盖期提示（2026-09 新增）══ 砍头/每期利息本质是"买下一个月的
+  // 使用权"：最后一笔已经填了利息的那一期，覆盖到"这一期到期日+1个月"。客户只要
+  // 在这个日期之前结清本金，就不用再多收利息；过了这个日期还没结清，才需要再收
+  // 一期利息（金额业务员自己跟客户协商填，不自动算）。这里只是把这个日期算出来
+  // 提示业务员，不会替业务员做决定。
+  var coverageHint = "";
+  var lastFilledIdx = -1;
+  for(var ci=rows.length-1; ci>=0; ci--) { if(rows[ci].interest>0) { lastFilledIdx = ci; break; } }
+  if(lastFilledIdx >= 0 && rows[lastFilledIdx].dueDate) {
+    var coverEnd = defaultDueDate(rows[lastFilledIdx].dueDate, 1);
+    var todayStr = new Date().toISOString().slice(0,10);
+    var remainIfSettle = diff>0 ? diff : 0;
+    if(todayStr <= coverEnd) {
+      coverageHint = "<div style=\"grid-column:1/-1;background:#e8f5e9;border-radius:8px;padding:10px 12px;font-size:12px;color:#2e7d32\">💡 第"+(lastFilledIdx+1)+"期利息已经覆盖到 "+coverEnd+"，客户在这之前结清本金（$"+remainIfSettle.toFixed(2)+"）不用再加收利息——直接在这一行点「✅本期结清」即可。</div>";
+    } else {
+      coverageHint = "<div style=\"grid-column:1/-1;background:#fff3e0;border-radius:8px;padding:10px 12px;font-size:12px;color:#e65100\">⚠️ 第"+(lastFilledIdx+1)+"期利息覆盖到 "+coverEnd+"，已经过了这个日期，客户现在结清通常要再收一期利息——金额可以跟客户协商，先点「➕ 客户续期，增加一期」加一行，手动填利息，再在那一行点「✅本期结清」。</div>";
+    }
+  }
   box.style.display = "block";
   box.innerHTML =
     "<div style=\"font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px\">"+headerText+"</div>"+
@@ -1773,11 +1792,32 @@ function renderCustomScheduleUI(d) {
     "<div style=\"background:#fff3e0;border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">利息合计</div><div id=\"cs_intTile\" style=\"font-size:18px;font-weight:700;color:#f57c00\">$"+sumInterest.toFixed(2)+"</div></div>"+
     "<div id=\"cs_sumTile\" style=\"background:"+(diff===0?"#e8f5e9":"#ffebee")+";border-radius:8px;padding:10px;text-align:center\"><div style=\"font-size:11px;color:#546e7a\">本金合计（应=贷款金额）</div><div class=\"cs-sum-val\" style=\"font-size:15px;font-weight:700;color:"+(diff===0?"#2e7d32":"#c62828")+"\">$"+sumPrincipal.toFixed(2)+(diff!==0?"（差$"+diff.toFixed(2)+"）":"（已配平）")+"</div></div>"+
     "<div id=\"cs_rateTile\" style=\"grid-column:1/-1;background:#ffebee;border-radius:8px;padding:10px;text-align:center;border:1.5px solid #ef9a9a\"><div style=\"font-size:11px;color:#546e7a\">🧮 反算实际月利率（砍头+上面填的利息，按当前期数"+term+"期平摊）</div><div class=\"cs-rate-val\" style=\"font-size:18px;font-weight:700;color:#c62828\">"+effMonthlyRate+"%</div><div class=\"cs-comp-val\" style=\"font-size:10px;color:#546e7a\">综合利息 $"+comprehensive.toFixed(2)+"（占实放"+comprehensivePct+"%）——跟着上面表格实时变，填得越多越准</div></div>"+
+    coverageHint+
     "</div>"+
     "<div class=\"btn-row\" style=\"margin-bottom:8px\">"+quickBtns+"</div>"+
-    "<div style=\"overflow-x:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><thead><tr style=\"background:#f5f5f5\"><th style=\"padding:6px 8px;text-align:left\">期数</th><th style=\"padding:6px 8px;text-align:left\">到期日</th><th style=\"padding:6px 8px;text-align:left\">应还本金</th><th style=\"padding:6px 8px;text-align:left\">应还利息</th><th style=\"padding:6px 8px;text-align:left\">合计</th></tr></thead><tbody>"+
+    "<div style=\"overflow-x:auto\"><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><thead><tr style=\"background:#f5f5f5\"><th style=\"padding:6px 8px;text-align:left\">期数</th><th style=\"padding:6px 8px;text-align:left\">到期日</th><th style=\"padding:6px 8px;text-align:left\">应还本金</th><th style=\"padding:6px 8px;text-align:left\">应还利息</th><th style=\"padding:6px 8px;text-align:left\">合计</th><th style=\"padding:6px 8px;text-align:left\">操作</th></tr></thead><tbody>"+
     rowsHtml + "</tbody></table></div>"+
-    "<div style=\"font-size:11px;color:var(--muted);margin-top:8px\">💡 本金/利息合计不需要非要对平才能保存——客户还没还完、或者是分批补录的，都可以先保存，之后回到这里继续补填，或者在「回款登记」里逐期登记实际收款。合同还没结束、客户要继续续期的话，点上面「➕ 客户续期，增加一期」就会在表格最后多加一行，前面已经填的期数不会被清空。</div>";
+    "<div style=\"font-size:11px;color:var(--muted);margin-top:8px\">💡 本金/利息合计不需要非要对平才能保存——客户还没还完、或者是分批补录的，都可以先保存，之后回到这里继续补填，或者在「回款登记」里逐期登记实际收款。合同还没结束、客户要继续续期的话，点上面「➕ 客户续期，增加一期」就会在表格最后多加一行，前面已经填的期数不会被清空。客户要是提前把本金还清了，点对应那一期的「✅本期结清」——本金会自动填进那一期，后面还没发生的期数会自动清空，不会多算利息。</div>";
+}
+// ══ "✅本期结清"：业务员点客户实际结清本金的那一期——本金自动填进这一期（=贷款
+// 金额-前面几期已经填的本金），后面还没发生的期数自动清空（贷款期限也跟着改小），
+// 这样"综合利息/实际月利率"就是按真实发生的期数算，不会被没发生的期数拖累或多算。
+function settleAtPeriod(period) {
+  var amount = parseFloat(document.getElementById("f_amount")?.value)||0;
+  var sumEarlierPrincipal = 0;
+  for(var i=1;i<period;i++) {
+    var pEl = document.getElementById('cs_p_'+i);
+    sumEarlierPrincipal += pEl ? (parseFloat(pEl.value)||0) : 0;
+  }
+  var remain = Math.round((amount - sumEarlierPrincipal)*100)/100;
+  if(remain<0) remain = 0;
+  var dueEl = document.getElementById('cs_d_'+period);
+  if(!confirm("确定客户在第"+period+"期（"+(dueEl?dueEl.value:'')+"）结清本金 $"+remain.toFixed(2)+" 吗？\n\n确定后：本金会自动填入第"+period+"期，贷款期限会改成"+period+"期，后面还没发生的期数会被清空（已经登记过回款的期数不受影响，需要的话再点「➕客户续期」加回来）。")) return;
+  var pEl = document.getElementById('cs_p_'+period);
+  if(pEl) pEl.value = remain;
+  var termEl = document.getElementById('f_term');
+  if(termEl) termEl.value = period;
+  onScheduleFieldChange();
 }
 // 客户续期：期数+1，重新渲染表格——之前已经填的每一期都会原样保留（渲染时优先
 // 读当前输入框里的值），表格最后只会多出一行空的给业务员填这一期新的
@@ -2471,6 +2511,29 @@ function repayPrefill(loan, period) {
   return { principal: 0, interest: interest, total: interest };
 }
 
+// ══ 提前还款覆盖期提示（跟 renderCustomScheduleUI 里那个是同一个道理，这里用的
+// 是已经真实登记过的回款期数，不是编辑表格里还没保存的草稿）══ 找到"已经登记过
+// 回款的最后一期"，按合同当前条件算出那一期的到期日，覆盖到"到期日+1个月"——
+// 今天在这之前，结清本金不用加收利息；今天超过了，提示业务员通常要再收一期。
+function loanCoverageHint(loan) {
+  if(!loan || loan.repay === REPAY_ACTUAL) return null;
+  var recorded = loanRecordedPeriods(loan.id);
+  if(!recorded.length) return null;
+  var lastP = Math.max.apply(null, recorded);
+  var calc = loanFreshInterestCalc(loan);
+  var entry = calc.schedule[lastP-1];
+  if(!entry || !entry.dueDate) return null;
+  var coverEnd = defaultDueDate(entry.dueDate, 1);
+  var today = new Date().toISOString().slice(0,10);
+  return { lastP: lastP, coverEnd: coverEnd, within: today <= coverEnd };
+}
+function coverageHintHtml(hint) {
+  if(!hint) return '';
+  return hint.within
+    ? '<div style="margin-top:8px;background:#e8f5e9;border-radius:8px;padding:8px 12px;font-size:12px;color:#2e7d32">💡 第'+hint.lastP+'期利息覆盖到 '+hint.coverEnd+'，客户在这之前结清本金不用再收利息</div>'
+    : '<div style="margin-top:8px;background:#fff3e0;border-radius:8px;padding:8px 12px;font-size:12px;color:#e65100">⚠️ 第'+hint.lastP+'期利息覆盖到 '+hint.coverEnd+'，已经过期，现在结清通常要再收一期利息——金额可以跟客户协商，手动改下面的"本期利息"</div>';
+}
+
 function renderRepayCollect() {
   var h='';
   h+='<div class="page-header"><div class="page-title">💰 回款登记</div><div class="page-sub">登记客户每期还款——先息后本/永续贷/等额本息通用，自动按当前合同条件拆分本金和利息</div></div>';
@@ -2532,7 +2595,7 @@ function onRepayLoanSelect() {
     '<span>📋 '+(loan.repay||'等额本息')+(isActual?'':' · 共'+(loan.term||1)+'期')+'</span>'+
     (isActual?'':'<span>🧮 月利率 '+(loan.rate||0)+'%</span>')+
     '<span>剩余本金 <b style="color:#e65100">$'+remain.toLocaleString()+'</b></span>'+
-    '</div>';
+    '</div>' + coverageHintHtml(loanCoverageHint(loan));
 
   var sel = document.getElementById('rc_period');
   var nextP = nextUnrecordedPeriod(id);
@@ -2571,7 +2634,13 @@ function onRepaySettleToggle() {
   var loan = _loans.find(function(l){ return l.id===loanId; });
   if(!loan) return;
   var checked = document.getElementById('rc_settle').checked;
-  if(checked) document.getElementById('rc_principal').value = loanRemainingPrincipal(loan);
+  if(checked) {
+    document.getElementById('rc_principal').value = loanRemainingPrincipal(loan);
+    // 上一期利息已经覆盖到今天之前的话，提前结清不用再收利息，自动把利息栏清零
+    // （业务员看到提示自己判断，这里只是省一步手动清零，不会覆盖过期的情况）
+    var hint = loanCoverageHint(loan);
+    if(hint && hint.within) document.getElementById('rc_interest').value = 0;
+  }
   else onRepayPeriodChange();
 }
 
