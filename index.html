@@ -1205,29 +1205,22 @@ function calcRepay(amount, rate, term, repay, haircut, customSchedule) {
       res.schedule.push({ period:i, principal: i===term ? amount : 0, interest: interest, total: i===term ? amount+interest : interest, note: i===term?'':'利息' });
     }
   } else {
-    // 等额本息（默认）: 每期还固定金额(本+息)
-    if(r === 0) {
-      var p = Math.round(amount/term*100)/100;
-      res.monthly = p;
-      res.totalRepay = amount;
-      res.totalInterest = 0;
-      for(var i=1;i<=term;i++) res.schedule.push({period:i,principal:p,interest:0,total:p});
-    } else {
-      var monthly = amount * r * Math.pow(1+r,term) / (Math.pow(1+r,term)-1);
-      monthly = Math.round(monthly*100)/100;
-      res.monthly = monthly;
-      var remain = amount;
-      var totalInt = 0;
-      for(var i=1;i<=term;i++) {
-        var intPart = Math.round(remain * r * 100) / 100;
-        var prinPart = Math.round((monthly - intPart) * 100) / 100;
-        if(i===term) prinPart = Math.round(remain*100)/100; // 最后一期还清余额
-        totalInt += intPart;
-        remain -= prinPart;
-        res.schedule.push({period:i, principal:prinPart, interest:intPart, total:Math.round((prinPart+intPart)*100)/100});
-      }
-      res.totalInterest = Math.round(totalInt*100)/100;
-      res.totalRepay = Math.round((amount+totalInt)*100)/100;
+    // 等额本息（默认）: 老板明确要求——不是教科书那种"利息按剩余本金递减"的算法，
+    // 是固定每期还等额本金 + 每期收一样多的利息（利息按贷款原始金额算，不管本金
+    // 还剩多少，月利息都不变），这样才跟先息后本/永续贷一样口径。这里只是给业务员
+    // 打个底稿（表格还没填过任何数据时，用这个算出参考值填进去），一旦业务员实际
+    // 逐期填了表格，customSchedule 才是准的，这里这个公式就用不上了（见 calcRepay
+    // 开头 scheduleHasManualData 的判断）。
+    var interest = Math.round(amount * r * 100) / 100;
+    res.monthly = interest;
+    res.totalInterest = Math.round(amount * r * term * 100) / 100;
+    res.totalRepay = Math.round((amount + res.totalInterest) * 100) / 100;
+    var prinPart = term ? Math.round(amount/term*100)/100 : amount;
+    var remain = amount;
+    for(var i=1;i<=term;i++) {
+      var p = i===term ? Math.round(remain*100)/100 : prinPart; // 最后一期把尾差找齐
+      remain = Math.round((remain-p)*100)/100;
+      res.schedule.push({period:i, principal:p, interest:interest, total:Math.round((p+interest)*100)/100});
     }
   }
   return res;
@@ -2166,10 +2159,20 @@ function filterList() {
   // 总金额统计——只算还没结清的这部分，已结清的不掺进日常要跟进的数字里
   var totalAmt=openList.reduce(function(s,l){return s+l.amount;},0);
   var totalMon=openList.reduce(function(s,l){return s+(l.monthly||0);},0);
+  // 本月实际已收利息——跟上面"月利息合计"不是一回事：那个是还款中合同的参考利息
+  // 规模，这个是真金白银本月已经到账的利息，包括：①本月放款的合同，砍头息（放款
+  // 那一刻就实收的钱，本质也是利息，只是提前收）；②本月「回款登记」/收入登记里
+  // 实际登记过的"利息收入"记录。不看筛选框（搜索/月份/方式/经办人），固定统计
+  // 自然月，口径跟利润表/现金流页面的"利息收入"、"砍头息"保持一致。
+  var thisMonth = new Date().toISOString().slice(0,7);
+  var monthHaircut = loanRecords().filter(function(l){return (l.date||'').slice(0,7)===thisMonth;}).reduce(function(s,l){return s+loanHaircutAmount(l);},0);
+  var monthInterestIncome = _financeRecords.filter(function(r){return r.category==='利息收入' && (r.date||'').slice(0,7)===thisMonth;}).reduce(function(s,r){return s+(r.amount||0);},0);
+  var monthActualInterest = Math.round((monthHaircut+monthInterestIncome)*100)/100;
   var h='<div style="font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;gap:16px;flex-wrap:wrap">'+
     '<span>共 <b>'+openList.length+'</b> 笔'+(s?'':'（不含已结清）')+'</span>'+
     '<span>贷款合计 <b style="color:#1565c0">$'+totalAmt.toLocaleString()+'</b></span>'+
     '<span>月利息合计 <b style="color:#2e7d32">$'+totalMon.toLocaleString()+'</b></span>'+
+    '<span title="本月（'+thisMonth+'）砍头息+实际登记的利息收入，含砍头息">本月实际已收利息 <b style="color:#8e24aa">$'+monthActualInterest.toLocaleString()+'</b></span>'+
     '</div>';
 
   if(openList.length===0) {
