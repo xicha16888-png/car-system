@@ -1963,10 +1963,10 @@ function renderActualTrackingUI(d) {
 
   var stats = loanActualStats(d);
   var recs = _financeRecords.filter(function(r){ return r.loanId===d.id && (r.category==='利息收入'||r.category==='本金回收'||r.category==='滞纳金'); })
-    .sort(function(a,b){ return (a.date||'').localeCompare(b.date||'') || ((a.period||0)-(b.period||0)); });
+    .sort(function(a,b){ return (a.date||'').localeCompare(b.date||'') || ((recordPeriod(a))-(recordPeriod(b))); });
   var rowsHtml = "";
   recs.forEach(function(r){
-    rowsHtml += "<tr><td>"+(r.period?'第'+r.period+'期':'—')+"</td><td>"+formatDate(r.date)+"</td><td>"+r.category+"</td><td style=\"font-weight:600;color:#2e7d32\">$"+Number(r.amount||0).toFixed(2)+"</td></tr>";
+    rowsHtml += "<tr><td>"+(recordPeriod(r)?'第'+recordPeriod(r)+'期':'—')+"</td><td>"+formatDate(r.date)+"</td><td>"+r.category+"</td><td style=\"font-weight:600;color:#2e7d32\">$"+Number(r.amount||0).toFixed(2)+"</td></tr>";
   });
 
   box.innerHTML =
@@ -2501,8 +2501,17 @@ function loanRemainingPrincipal(loan) {
   var recovered = _financeRecords.filter(function(r){ return r.loanId===loan.id && r.category==='本金回收'; }).reduce(function(s,r){ return s+(r.amount||0); }, 0);
   return Math.max(0, Math.round(((loan.amount||0) - recovered)*100)/100);
 }
+// 老数据兜底：早年批量导入/历史结算录入的回款记录，当时没有存period这个字段，
+// 但备注里明确写着"第N期"（导入时人是知道是哪一期的，只是程序没接住）。
+// 如果不做这个兜底，回款登记页判断"这一期收没收"时会完全看不到这些老记录，
+// 于是把明明已经收过的老期数误判成"⚠️已逾期"（本来是已经在历史结算里结过的）。
+function recordPeriod(r) {
+  if(r.period) return r.period;
+  var m = (r.note||'').match(/第(\d+)期/);
+  return m ? parseInt(m[1]) : 0;
+}
 function loanRecordedPeriods(loanId) {
-  return _financeRecords.filter(function(r){ return r.loanId===loanId && r.period; }).map(function(r){ return r.period; });
+  return _financeRecords.filter(function(r){ return r.loanId===loanId && recordPeriod(r); }).map(function(r){ return recordPeriod(r); });
 }
 function nextUnrecordedPeriod(loanId) {
   var periods = loanRecordedPeriods(loanId);
@@ -2660,12 +2669,12 @@ function renderRepayHistory(loanId) {
   var card = document.getElementById('rc_historyCard');
   var body = document.getElementById('rc_historyBody');
   var records = _financeRecords.filter(function(r){ return r.loanId===loanId && (r.category==='利息收入'||r.category==='本金回收'||r.category==='滞纳金'); });
-  records.sort(function(a,b){ return (b.date||'').localeCompare(a.date||'') || ((b.period||0)-(a.period||0)); });
+  records.sort(function(a,b){ return (b.date||'').localeCompare(a.date||'') || ((recordPeriod(b))-(recordPeriod(a))); });
   if(!records.length) { card.style.display='none'; return; }
   card.style.display='block';
   var h='<div class="table-wrap"><table><thead><tr><th>期数</th><th>日期</th><th>分类</th><th>金额</th><th>备注</th><th>操作</th></tr></thead><tbody>';
   records.forEach(function(r){
-    h+='<tr><td>'+(r.period?'第'+r.period+'期':'—')+'</td><td>'+formatDate(r.date)+'</td><td>'+r.category+'</td>';
+    h+='<tr><td>'+(recordPeriod(r)?'第'+recordPeriod(r)+'期':'—')+'</td><td>'+formatDate(r.date)+'</td><td>'+r.category+'</td>';
     h+='<td style="font-weight:600;color:#2e7d32">'+formatMoney(r.amount)+'</td>';
     h+='<td style="color:var(--muted);font-size:12px">'+(r.note||'')+'</td>';
     h+='<td>'+(canDelete()?'<button class="btn btn-sm btn-danger" onclick="deleteFinanceRecord(\''+r.id+'\')">删除</button>':'<span style="color:var(--muted);font-size:12px">—</span>')+'</td></tr>';
