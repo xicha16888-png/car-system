@@ -248,7 +248,7 @@ html,body{overflow:auto;height:auto}
 
 // ══ 版本号：老板每次改完系统、贴到GitHub部署新版之后，把这个数字改一下 ══
 // （改哪一位都行，只要跟上一个版本不一样，业务员浏览器就能感知到"有新版本"）
-var APP_VERSION = "20260928a";
+var APP_VERSION = "20260928b";
 var _pendingUpdate = false;   // 已经检测到线上有新版本，还没刷新
 var _updateSnoozed = false;   // 业务员点了"稍后"，先别再弹倒计时打扰他
 // 只在这些"纯浏览/看报表"页面允许直接自动刷新——凡是可能正在填表/登记的页面
@@ -3248,8 +3248,11 @@ function startApp() {
     document.getElementById("loadingOverlay").classList.remove("show");
     renderHome();
   });
-  // 登录进来之后才开始查新版本——每2分钟查一次，切回这个标签页/重新联网时也立刻查一次
-  setInterval(checkForUpdate, 120000);
+  // 登录进来立刻查一次新版本（不等第一个周期），之后每60秒查一次；
+  // 切回这个标签页/重新联网时也立刻查一次。配合server.js那边index.html不缓存的
+  // 设置，保证不管业务员开着这页面多久没刷新，最多1分钟内就能自动追上最新版本。
+  checkForUpdate();
+  setInterval(checkForUpdate, 60000);
   document.addEventListener("visibilitychange", function(){ if(!document.hidden) checkForUpdate(); });
   window.addEventListener("online", checkForUpdate);
 }
