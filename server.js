@@ -430,15 +430,34 @@ async function loadData() {
   return result;
 }
 
-// 读取所有数据（业务员看不到财务记录）
+// 读取所有数据（业务员看不到财务记录的具体金额/分类）
 app.get('/api/data', auth, async (req, res) => {
   try {
     const data = await loadData();
     if (!Array.isArray(data.car_loans)) data.car_loans = [];
     if (!Array.isArray(data.car_finance)) data.car_finance = [];
     if (!data.car_nextId) data.car_nextId = 1;
+    // 2026-09修复："哪张合同、第几期已经登记过回款"这件事，不管老板还是业务员登录
+    // 都必须一样——不然回款登记/逾期催收页判断"是不是逾期"用的数据两边不一致，
+    // 业务员那边会把明明已经收过的老期数当成没收过、全部误判成逾期，跟老板端
+    // 完全对不上（这个字段本身不含金额，只是"loanId+第几期"这个组合，不算财务
+    // 保密的范围）。在下面按角色清空car_finance之前，先把这份"期数清单"提出来，
+    // 不管什么角色都完整下发；period字段是空的老记录（早年批量导入没写period），
+    // 跟前端recordPeriod()一样从备注"第N期"里兜底解析一次。
+    const loanPeriods = data.car_finance
+      .filter(r => r && r.loanId)
+      .map(r => {
+        let period = r.period;
+        if (!period) {
+          const m = /第(\d+)期/.exec(r.note || '');
+          period = m ? parseInt(m[1], 10) : 0;
+        }
+        return { loanId: r.loanId, period };
+      })
+      .filter(x => x.period > 0);
+    data.car_finance_periods = loanPeriods;
     if (req.user.role === 'sales') {
-      data.car_finance = []; // 业务员只管业务，财务数据服务器直接不下发
+      data.car_finance = []; // 业务员看不到具体金额/分类这些财务明细，上面car_finance_periods已经单独发了
     }
     res.json(data);
   } catch(e) {
