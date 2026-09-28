@@ -15,7 +15,20 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '50mb' }));
-app.use(express.static(__dirname));
+// 2026-09：index.html绝对不能被浏览器缓存住——不然老板贴完新代码、Render部署好了
+// 之后，业务员那边只要浏览器（或者手机）缓存了旧的index.html，哪怕手动刷新也可能
+// 还是拿到本地缓存的老版本，出现"业务员看到的和老板看到的不一样"（比如业务员那边
+// 还在用没修复"回款登记"bug之前的老代码）。加上这几个响应头之后，每次请求
+// index.html浏览器都必须去服务器重新要一份最新的，不会用本地缓存顶替。
+app.use(express.static(__dirname, {
+  setHeaders: function(res, filePath) {
+    if (filePath.endsWith('index.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }
+}));
 
 // Key 藏在环境变量里，前端看不到
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
