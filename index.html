@@ -7,14 +7,15 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{--navy:#0f2d5c;--blue:#1565c0;--sky:#1e88e5;--light:#e3f2fd;--green:#2e7d32;--red:#c62828;--amber:#f57c00;--purple:#6a1b9a;--gray:#546e7a;--bg:#f0f4f8;--white:#fff;--border:#cfd8dc;--text:#1a2a3a;--muted:#78909c}
+:root{--navy:#0f2d5c;--blue:#1565c0;--sky:#1e88e5;--light:#e3f2fd;--green:#2e7d32;--red:#c62828;--amber:#f57c00;--purple:#6a1b9a;--gray:#546e7a;--bg:#f0f4f8;--white:#fff;--border:#cfd8dc;--text:#1a2a3a;--muted:#78909c;--banner-h:0px}
 html,body{height:100%;overflow:hidden}
 body{font-family:"Noto Sans SC",sans-serif;background:var(--bg);color:var(--text)}
-.header{background:linear-gradient(135deg,#0a1f42,var(--navy) 40%,var(--blue) 80%,var(--sky));color:#fff;padding:0 20px;height:54px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 16px rgba(0,0,0,.35);position:fixed;top:0;left:0;right:0;z-index:200}
+.header{background:linear-gradient(135deg,#0a1f42,var(--navy) 40%,var(--blue) 80%,var(--sky));color:#fff;padding:0 20px;height:54px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 16px rgba(0,0,0,.35);position:fixed;top:var(--banner-h);left:0;right:0;z-index:200}
+.update-banner{position:fixed;top:0;left:0;right:0;z-index:600;background:linear-gradient(135deg,#8e24aa,#5e35b1);color:#fff;padding:9px 16px;display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;font-size:13px;font-weight:600;box-shadow:0 2px 12px rgba(0,0,0,.3)}
 .header-title{font-size:18px;font-weight:700;display:flex;align-items:center;gap:10px}
 .header-right{display:flex;align-items:center;gap:12px;font-size:12px}
 .chip{background:rgba(255,255,255,.15);padding:4px 12px;border-radius:20px;font-size:11px;border:1px solid rgba(255,255,255,.2)}
-.layout{display:flex;height:calc(100vh - 54px);margin-top:54px}
+.layout{display:flex;height:calc(100vh - 54px - var(--banner-h));margin-top:calc(54px + var(--banner-h))}
 .sidebar{width:215px;background:linear-gradient(180deg,#0a1f42,var(--navy));color:#fff;display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0}
 .sidebar::-webkit-scrollbar{width:3px}
 .sidebar::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15)}
@@ -150,7 +151,7 @@ tr:hover td{background:#f8faff}
 html,body{overflow:auto;height:auto}
 .sidebar{display:none}
 .mob-nav{display:flex}
-.layout{flex-direction:column;height:auto;margin-top:48px;margin-bottom:60px}
+.layout{flex-direction:column;height:auto;margin-top:calc(48px + var(--banner-h));margin-bottom:60px}
 .main{padding:10px;overflow-y:visible}
 .header{padding:0 12px;height:48px}
 .header-title{font-size:13px;gap:6px}
@@ -191,6 +192,11 @@ html,body{overflow:auto;height:auto}
     <div class="login-error" id="loginError"></div>
     <div class="login-foot">忘记密码请联系管理员</div>
   </div>
+</div>
+<div class="update-banner" id="updateBanner" style="display:none">
+  <span id="updateBannerTxt">🆕 系统已更新到最新版本</span>
+  <button class="btn btn-sm" style="background:#fff;color:#1565c0;font-weight:700" onclick="location.reload()">立即刷新</button>
+  <button class="btn btn-sm" id="updateBannerSnooze" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.5)" onclick="snoozeUpdateBanner()">稍后（离开此页自动刷新）</button>
 </div>
 <div class="header">
   <div class="header-title">🚗 <span>汽车抵押贷款管理系统</span></div>
@@ -239,6 +245,17 @@ html,body{overflow:auto;height:auto}
 </div>
 <script>
 "use strict";
+
+// ══ 版本号：老板每次改完系统、贴到GitHub部署新版之后，把这个数字改一下 ══
+// （改哪一位都行，只要跟上一个版本不一样，业务员浏览器就能感知到"有新版本"）
+var APP_VERSION = "20260928a";
+var _pendingUpdate = false;   // 已经检测到线上有新版本，还没刷新
+var _updateSnoozed = false;   // 业务员点了"稍后"，先别再弹倒计时打扰他
+// 只在这些"纯浏览/看报表"页面允许直接自动刷新——凡是可能正在填表/登记的页面
+// （新增贷款/回款登记/收支登记/批量导入/收购车辆/结算/账号管理等）一律不打扰，
+// 等业务员自己点导航离开那个页面时，再顺手刷新，绝不会打断他正在填的东西。
+var SAFE_NAV_PAGES = ["home","list","finance_pnl","finance_cashflow","overdue",
+  "haircut_detail","interest_detail","profit_detail","acquired_list","data_check","oplog"];
 
 // ══ 后端API配置（Key藏在服务器，前端看不到）══
 var _loans = [];
@@ -1311,8 +1328,61 @@ function pageAllowed(page) {
   if(req==="addFinance") return canAddFinance();
   return true;
 }
+// ══════════════════════════════════════════════
+// ══ 自动检测新版本、提醒/自动刷新（老板要求：改完系统业务员不能还停在老版本）══
+// 原理：定期拿一份最新的index.html文本回来，对比里面写的APP_VERSION和自己当前
+// 跑的是不是一样，不一样说明服务器已经是新版本了。为了不打断业务员正在填的表，
+// 只有在"纯浏览页面"才自动倒计时刷新；如果他正在填表，就只挂个提示条，
+// 等他自己点导航离开那张表（说明已经填完/放弃了）的瞬间顺手刷新。
+// ══════════════════════════════════════════════
+function checkForUpdate() {
+  if(_pendingUpdate) return; // 已经在等刷新了，不用再查
+  fetch(location.pathname + "?_v=" + Date.now(), {cache:"no-store"})
+    .then(function(r){ return r.text(); })
+    .then(function(html){
+      var m = html.match(/APP_VERSION\s*=\s*"([^"]+)"/);
+      if(m && m[1] && m[1] !== APP_VERSION) onUpdateDetected();
+    })
+    .catch(function(){ /* 查不到就算了，下个周期再试，不打扰业务员 */ });
+}
+function setUpdateBannerVisible(show) {
+  var banner = document.getElementById("updateBanner");
+  if(!banner) return;
+  banner.style.display = show ? "flex" : "none";
+  document.documentElement.style.setProperty("--banner-h", show ? banner.offsetHeight + "px" : "0px");
+}
+function onUpdateDetected() {
+  if(_pendingUpdate) return;
+  _pendingUpdate = true;
+  setUpdateBannerVisible(true);
+  var txt = document.getElementById("updateBannerTxt");
+  var snoozeBtn = document.getElementById("updateBannerSnooze");
+  if(!_updateSnoozed && SAFE_NAV_PAGES.indexOf(_currentNav) >= 0) {
+    // 当前是纯浏览页面，没有正在填的东西，直接倒计时自动刷新
+    var sec = 5;
+    var timer = setInterval(function(){
+      sec--;
+      if(txt) txt.textContent = "🆕 系统已更新到最新版本，"+sec+"秒后自动刷新…";
+      if(sec<=0) { clearInterval(timer); location.reload(); }
+    }, 1000);
+    if(txt) txt.textContent = "🆕 系统已更新到最新版本，"+sec+"秒后自动刷新…";
+    if(snoozeBtn) snoozeBtn.onclick = function(){ clearInterval(timer); snoozeUpdateBanner(); };
+  } else {
+    // 正在填表/登记，不能说刷新就刷新，只提示，等他自己导航离开这页再刷新
+    if(txt) txt.textContent = "🆕 系统已更新到最新版本，请先保存/完成当前操作，离开本页时会自动刷新";
+  }
+}
+function snoozeUpdateBanner() {
+  _updateSnoozed = true;
+  var txt = document.getElementById("updateBannerTxt");
+  if(txt) txt.textContent = "🆕 系统已更新到最新版本，离开当前页面会自动刷新";
+}
+
 function nav(page) {
   if(!pageAllowed(page)) { alert("⛔ 你的账号（"+(CURRENT_DISPLAY||CURRENT_ROLE)+"）没有权限查看此页面"); page="home"; }
+  // 有新版本待更新，且要去的是纯浏览页面：不渲染老版本页面了，直接刷新拿新版，
+  // 刷新后浏览器地址栏当前页不会变，但这一下刷新逻辑简单起见就统一落回新版首页。
+  if(_pendingUpdate && SAFE_NAV_PAGES.indexOf(page) >= 0) { location.reload(); return; }
   _currentNav = page;
   buildSidebar(); buildMobNav(); closeMobMore();
   window.scrollTo(0,0);
@@ -3147,6 +3217,10 @@ function startApp() {
     document.getElementById("loadingOverlay").classList.remove("show");
     renderHome();
   });
+  // 登录进来之后才开始查新版本——每2分钟查一次，切回这个标签页/重新联网时也立刻查一次
+  setInterval(checkForUpdate, 120000);
+  document.addEventListener("visibilitychange", function(){ if(!document.hidden) checkForUpdate(); });
+  window.addEventListener("online", checkForUpdate);
 }
 
 document.getElementById("loadingOverlay").classList.remove("show");
