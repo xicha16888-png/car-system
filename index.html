@@ -1570,8 +1570,8 @@ async function recordSettlementExtraction() {
 function renderHome() {
   var _lr = loanRecords();
   var total = _lr.length;
-  var active = _lr.filter(function(l){return l.status==="active"}).length;
-  var overdue = _lr.filter(function(l){return l.status==="overdue"}).length;
+  var active = _lr.filter(function(l){return displayStatus(l)==="active"}).length;
+  var overdue = _lr.filter(isLoanOverdue).length;
   var pending = _lr.filter(function(l){return l.status==="pending"}).length;
   var closed = _lr.filter(function(l){return l.status==="closed"}).length;
   var totalAmt = _lr.reduce(function(s,l){return s+l.amount},0);
@@ -1631,7 +1631,7 @@ function renderHome() {
     var recent = _lr.slice(-5).reverse();
     for(var i=0;i<recent.length;i++) {
       var l = recent[i];
-      h += '<tr><td style="font-weight:600;color:var(--sky)">'+l.id+'</td><td>'+l.name+'</td><td>'+l.plate+'</td><td>'+formatMoney(l.amount)+'</td><td>'+statusHtml(l.status)+'</td><td>'+formatDate(l.date)+'</td></tr>';
+      h += '<tr><td style="font-weight:600;color:var(--sky)">'+l.id+'</td><td>'+l.name+'</td><td>'+l.plate+'</td><td>'+formatMoney(l.amount)+'</td><td>'+statusHtml(displayStatus(l))+'</td><td>'+formatDate(l.date)+'</td></tr>';
     }
     h += "</tbody></table></div>";
   }
@@ -1717,7 +1717,9 @@ function renderAddForm(data) {
   ["先息后本","等额本息","永续贷","自定义还款","实收记账"].forEach(function(v){ h += "<option value=\""+v+"\""+((d.repay===v||(v==="先息后本"&&!d.repay))?" selected":"")+">"+v+"</option>"; });
   h += "</select></div>";
   h += "<div class=\"form-group\"><label>状态</label><select id=\"f_status\">";
-  [{v:"pending",l:"审核中"},{v:"active",l:"还款中"},{v:"overdue",l:"已逾期"},{v:"closed",l:"已结清"}].forEach(function(o){ h += "<option value=\""+o.v+"\""+((d.status===o.v||(o.v==="pending"&&!d.status))?" selected":"")+">"+o.l+"</option>"; });
+  // "已逾期"不再放进这个手动下拉——现在完全由系统按到期日自动算（见isLoanOverdue），
+  // 不用业务员/老板手动去点，选了也不影响实际判断，干脆去掉避免误会
+  [{v:"pending",l:"审核中"},{v:"active",l:"还款中"},{v:"closed",l:"已结清"}].forEach(function(o){ h += "<option value=\""+o.v+"\""+((d.status===o.v||d.status==='overdue'&&o.v==='active'||(o.v==="pending"&&!d.status))?" selected":"")+">"+o.l+"</option>"; });
   h += "</select></div>";
   h += "<div class=\"form-group\"><label>放款日期</label><input type=\"date\" id=\"f_date\" value=\""+(d.date||new Date().toISOString().slice(0,10))+"\" ></div>";
   h += "<div class=\"form-group span3\"><label>备注</label><textarea id=\"f_note\" placeholder=\"其他需要记录的信息...\">"+(d.note||"")+"</textarea></div>";
@@ -2129,8 +2131,8 @@ async function saveLoan() {
 
 function renderList() {
   var _lr = loanRecords();
-  var active  = _lr.filter(function(l){return l.status==='active';}).length;
-  var overdue = _lr.filter(function(l){return l.status==='overdue';}).length;
+  var active  = _lr.filter(function(l){return displayStatus(l)==='active';}).length;
+  var overdue = _lr.filter(isLoanOverdue).length;
   var closed  = _lr.filter(function(l){return l.status==='closed';}).length;
   var pending = _lr.filter(function(l){return l.status==='pending';}).length;
   var h='';
@@ -2216,7 +2218,7 @@ function filterList() {
   var openList, closedList;
   if(s) {
     // 专门选了某个状态（哪怕就是选"已结清"）：按老样子精确匹配，不额外拆分
-    openList = base.filter(function(l){return l.status===s;});
+    openList = base.filter(function(l){return s==='closed' ? l.status===s : displayStatus(l)===s;});
     closedList = [];
   } else {
     openList = base.filter(function(l){return l.status!=='closed';});
@@ -2288,9 +2290,10 @@ function renderLoanGroups(loans, mobile, keyPrefix) {
       h+='<span style="font-size:12px;opacity:.8">'+gloans.length+'笔 · $'+gamt.toLocaleString()+'</span></div>';
       h+='<div id="mg_'+mk+'" style="display:'+(isCollapsed?'none':'')+';">';
       gloans.forEach(function(l){
-        var sc=l.status==='overdue'?'overdue':l.status==='closed'?'closed':l.status==='pending'?'pending':'';
+        var ds=displayStatus(l);
+        var sc=ds==='overdue'?'overdue':ds==='closed'?'closed':ds==='pending'?'pending':'';
         h+='<div class="loan-card '+sc+'">';
-        h+='<div class="loan-card-top"><div><div class="loan-card-name">'+l.name+'</div><div class="loan-card-meta">'+l.id+' · '+formatDate(l.date)+(l.agent?' · 经办：'+l.agent:'')+'</div></div>'+statusHtml(l.status)+'</div>';
+        h+='<div class="loan-card-top"><div><div class="loan-card-name">'+l.name+'</div><div class="loan-card-meta">'+l.id+' · '+formatDate(l.date)+(l.agent?' · 经办：'+l.agent:'')+'</div></div>'+statusHtml(ds)+'</div>';
         h+='<div class="loan-card-row"><span class="loan-card-lbl">🚗 车牌</span><span class="loan-card-val">'+l.plate+(l.brand?' · '+l.brand:'')+'</span></div>';
         h+='<div class="loan-card-row"><span class="loan-card-lbl">📱 手机</span><span class="loan-card-val">'+l.phone+'</span></div>';
         h+='<div class="loan-card-row"><span class="loan-card-lbl">💰 贷款金额</span><span class="loan-card-val" style="color:var(--sky)">'+formatMoney(l.amount)+'</span></div>';
@@ -2317,7 +2320,8 @@ function renderLoanGroups(loans, mobile, keyPrefix) {
       h+='<th>#</th><th>客户姓名</th><th>手机号</th><th>车牌 / 品牌</th><th>贷款金额</th><th>实际放款</th><th>砍头%</th><th>月利息</th><th>实际月利率</th><th>还款方式</th><th>状态</th><th>放款日</th><th>操作</th>';
       h+='</tr></thead><tbody>';
       gloans.forEach(function(l){
-        var sc=l.status==='overdue'?'#ffebee':l.status==='closed'?'#fafafa':l.status==='pending'?'#fff8e1':'';
+        var ds=displayStatus(l);
+        var sc=ds==='overdue'?'#ffebee':ds==='closed'?'#fafafa':ds==='pending'?'#fff8e1':'';
         h+='<tr style="background:'+sc+'">';
         h+='<td style="font-weight:700;color:var(--sky);font-size:12px;white-space:nowrap">'+l.id+'</td>';
         h+='<td><div style="font-weight:600;color:var(--navy)">'+l.name+'</div>'+(l.agent?'<div style="font-size:11px;color:var(--muted)">经办：'+l.agent+'</div>':'')+'</td>';
@@ -2329,7 +2333,7 @@ function renderLoanGroups(loans, mobile, keyPrefix) {
         h+='<td style="font-weight:600;color:#2e7d32">'+(l.repay===REPAY_ACTUAL?'按实收':'$'+(l.monthly||0).toFixed(2))+'</td>';
         h+='<td style="font-weight:700;color:#c62828;white-space:nowrap">'+loanEffectiveMonthlyRate(l)+'%/月<div style="font-size:10px;color:var(--muted);font-weight:400">综合$'+loanComprehensiveInterest(l).toFixed(2)+'</div></td>';
         h+='<td><span style="font-size:11px;background:#e3f2fd;color:#1565c0;padding:2px 7px;border-radius:10px;white-space:nowrap">'+(l.repay||'等额本息')+'</span></td>';
-        h+='<td>'+statusHtml(l.status)+'</td>';
+        h+='<td>'+statusHtml(ds)+'</td>';
         h+='<td style="font-size:11px;color:var(--muted);white-space:nowrap">'+formatDate(l.date)+'</td>';
         h+='<td style="white-space:nowrap">'+(canWriteLoans()?'<button class="btn btn-sm btn-primary" onclick="editLoan(\''+l.id+'\')">✏️ 编辑</button> ':'')+(canDelete()?'<button class="btn btn-sm btn-danger" onclick="deleteLoan(\''+l.id+'\')">删除</button>':(canWriteLoans()?'':'<span style="color:var(--muted);font-size:12px">只读</span>'))+'</td>';
         h+='</tr>';
@@ -2555,7 +2559,7 @@ function onLoanSelect() {
     '<span>💰 贷款 <b style="color:#1565c0">$'+loan.amount.toLocaleString()+'</b></span>'+
     '<span>💵 月利息 <b style="color:#2e7d32">$'+(loan.monthly||0).toFixed(2)+'</b></span>'+
     '<span>📋 '+(loan.repay||'等额本息')+'</span>'+
-    '<span>状态 '+statusHtml(loan.status)+'</span>'+
+    '<span>状态 '+statusHtml(displayStatus(loan))+'</span>'+
     '</div>';
 }
 
@@ -2587,6 +2591,33 @@ function nextUnrecordedPeriod(loanId) {
   var periods = loanRecordedPeriods(loanId);
   if(!periods.length) return 1;
   return Math.max.apply(null, periods) + 1;
+}
+// ══ 逾期判断统一收口到这里 ══ 2026-09发现：老板手动挑"状态"下拉框里的"已逾期"，
+// 没人会记得每期到期了就去点一下，导致"逾期催收"页永远看不到真实该催收的合同——
+// 但"回款登记"页那边（onRepayLoanSelect）一直是按"下一期该收的日期是不是已经过了"
+// 实时算的，两边各算各的，看起来就像同一张合同"回款登记说逾期、逾期页却没有"。
+// 现在统一改成完全按数据算，不再依赖人手动标记：只要合同还在正常进行中（状态是
+// "还款中"，或者是老数据里手动标过的"已逾期"），下一期该收款的日期已经过了、
+// 但还没登记到那一期，就判定为真实逾期——这个结果覆盖掉状态下拉框里"已逾期"这个
+// 选项本身要表达的意思，所以下面新增合同/编辑合同的状态下拉框里也把"已逾期"这个
+// 选项去掉了，不再需要手动选，选了也不影响这里的判断。
+function isLoanOverdue(loan) {
+  if(!loan) return false;
+  if(loan.status!=='active' && loan.status!=='overdue') return false; // 审核中/已结清不算逾期
+  if(loan.repay === REPAY_ACTUAL) return false; // 实收记账没有预设期数/到期日，算不了
+  var nextP = nextUnrecordedPeriod(loan.id);
+  var calc = loanFreshInterestCalc(loan);
+  var entry = calc.schedule[nextP-1];
+  if(!entry || !entry.dueDate) return false;
+  var today = new Date().toISOString().slice(0,10);
+  return entry.dueDate < today;
+}
+// 给列表/统计/徽章用的"展示状态"：审核中/已结清照旧，还款中/已逾期改成完全按上面
+// isLoanOverdue()实时算，不再看数据库里存的那个status字段是不是刚好等于"overdue"。
+function displayStatus(loan) {
+  if(!loan) return 'active';
+  if(loan.status==='pending' || loan.status==='closed') return loan.status;
+  return isLoanOverdue(loan) ? 'overdue' : 'active';
 }
 // 按合同当前条件重新算出的还款计划表，取第N期该收的本金/利息/合计；
 // 如果客户还在继续还（比如永续贷早就超过了当初录的期数），超出计划表的部分按
@@ -2908,8 +2939,8 @@ function renderFinancePnL() {
   function inMonth(d,ym){ return d&&String(d).slice(0,7)===ym; }
 
   var _lr = loanRecords();
-  var activeLoans  = _lr.filter(function(l){return l.status==='active';});
-  var overdueLoans = _lr.filter(function(l){return l.status==='overdue';});
+  var activeLoans  = _lr.filter(function(l){return displayStatus(l)==='active';});
+  var overdueLoans = _lr.filter(isLoanOverdue);
   var closedLoans  = _lr.filter(function(l){return l.status==='closed';});
   var pendingLoans = _lr.filter(function(l){return l.status==='pending';});
   var inBetLoans   = _lr.filter(function(l){return l.status==='active'||l.status==='overdue';});
@@ -3085,7 +3116,7 @@ function renderCashFlow() {
 }
 
 function renderOverdue() {
-  var overdue = _loans.filter(function(l){return l.status==="overdue"});
+  var overdue = loanRecords().filter(isLoanOverdue);
   var h = '<div class="page-header"><div class="page-title">⚠️ 逾期催收</div><div class="page-sub">共 '+overdue.length+' 笔逾期贷款</div></div>';
   if(overdue.length===0) { h += '<div class="card" style="text-align:center;padding:50px"><div style="font-size:48px;margin-bottom:12px">🎉</div><div style="font-size:16px;font-weight:600;color:var(--green)">暂无逾期贷款！</div></div>'; document.getElementById("mainContent").innerHTML = h; return; }
   h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>手机号</th><th>车牌</th><th>金额</th><th>月供</th><th>放款日</th><th>操作</th></tr></thead><tbody>';
@@ -3152,7 +3183,7 @@ function renderDataCheck() {
   else {
     h += '<div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>贷款金额</th><th>还款方式</th><th>期数</th><th>状态</th><th>操作</th></tr></thead><tbody>';
     groupA.forEach(function(l){
-      h += '<tr><td style="font-weight:600">'+l.id+'</td><td>'+l.name+'</td><td>'+formatMoney(l.amount)+'</td><td>'+(l.repay||'')+'</td><td>'+(l.term||'')+'期</td><td>'+statusHtml(l.status)+'</td>'+
+      h += '<tr><td style="font-weight:600">'+l.id+'</td><td>'+l.name+'</td><td>'+formatMoney(l.amount)+'</td><td>'+(l.repay||'')+'</td><td>'+(l.term||'')+'期</td><td>'+statusHtml(displayStatus(l))+'</td>'+
         '<td>'+(canWriteLoans()?'<button class="btn btn-sm btn-primary" onclick="editLoan(\''+l.id+'\')">去修正</button>':'')+'</td></tr>';
     });
     h += '</tbody></table></div>';
