@@ -248,7 +248,7 @@ html,body{overflow:auto;height:auto}
 
 // ══ 版本号：老板每次改完系统、贴到GitHub部署新版之后，把这个数字改一下 ══
 // （改哪一位都行，只要跟上一个版本不一样，业务员浏览器就能感知到"有新版本"）
-var APP_VERSION = "20260928b";
+var APP_VERSION = "20260928c";
 var _pendingUpdate = false;   // 已经检测到线上有新版本，还没刷新
 var _updateSnoozed = false;   // 业务员点了"稍后"，先别再弹倒计时打扰他
 // 只在这些"纯浏览/看报表"页面允许直接自动刷新——凡是可能正在填表/登记的页面
@@ -264,6 +264,10 @@ var _collapsedMonths = {}; // 记录折叠状态
 var _closedSectionOpen = false; // "已结清"折叠区默认收起，点了才展开
 var _currentNav = "home";
 var _financeRecords = [];
+// 2026-09新增："哪张合同、第几期已经登记过"这份清单，不管什么角色登录都完整拿到
+// （服务器那边单独发的car_finance_periods，只有loanId+period，不含金额），
+// 不再依赖角色能不能看到完整_financeRecords——loanRecordedPeriods()改成看这个。
+var _loanPeriods = [];
 var _syncStatus = "idle";
 
 // ══════════════════════════════════════════════
@@ -936,11 +940,13 @@ async function loadAllData() {
     var data = await res.json();
     _loans = data.car_loans || [];
     _financeRecords = data.car_finance || [];
+    _loanPeriods = data.car_finance_periods || [];
     setSyncStatus("ok");
   } catch(e) {
     setSyncStatus("error");
     _loans = [];
     _financeRecords = [];
+    _loanPeriods = [];
   }
 }
 
@@ -2585,7 +2591,11 @@ function recordPeriod(r) {
   return m ? parseInt(m[1]) : 0;
 }
 function loanRecordedPeriods(loanId) {
-  return _financeRecords.filter(function(r){ return r.loanId===loanId && recordPeriod(r); }).map(function(r){ return recordPeriod(r); });
+  // 2026-09修复：改成看_loanPeriods（服务器单独发的"loanId+第几期"清单，不管
+  // 老板/业务员/财务登录都完整拿到），不再看_financeRecords——业务员角色的
+  // _financeRecords服务器一直是清空的（保护具体金额），如果这里还看它，业务员
+  // 端会把所有合同都当成"一期都没收过"，逾期/已登记判断全部跟老板端对不上。
+  return _loanPeriods.filter(function(p){ return p.loanId===loanId; }).map(function(p){ return p.period; });
 }
 function nextUnrecordedPeriod(loanId) {
   var periods = loanRecordedPeriods(loanId);
@@ -2807,6 +2817,11 @@ async function saveRepayCollect() {
     return freshFinance;
   });
   if(!financeResult.ok) { alert("⚠️ 回款保存失败，请检查网络后重试"); return; }
+  // _loanPeriods是单独一份"哪张合同第几期已登记"的清单，不会被mutateData自动
+  // 同步（那个只管_financeRecords/_loans）——这里手动把刚保存的这期补进去，
+  // 不然业务员这一次登录期间，同一张合同的下拉框/逾期判断还是看不到刚存的这期，
+  // 得等下次整页刷新才会更新，容易让人以为"存进去了怎么还显示没登记"。
+  newRecs.forEach(function(r){ _loanPeriods.push({ loanId: r.loanId, period: r.period }); });
 
   // mutateData 保存成功后，_financeRecords 已经同步为"最新数据+刚登记的这几条"，
   // 这里算剩余本金用的是这份最新数据，不会因为本地过时而算错
