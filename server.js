@@ -309,7 +309,18 @@ function checkKeyPermission(role, key, newValue, currentData) {
   if (perm.add === true && perm.edit === true && perm.del === true) {
     return { ok: true, mergedValue: newValue, added, edited, removed }; // 老板全权，信任客户端提交的完整数组
   }
-  if (removed.length > 0 && !perm.del) return { ok: false, reason: '无权删除记录' };
+  // 2026-09 修复：sales在car_finance上是"add-only且看不到真实旧数据"的角色——
+  // GET /api/data 那边对sales角色本来就不下发car_finance（财务数据保密，见那边
+  // 注释），所以业务员客户端手上的"旧数组"永远是空的，每次登记回款、把新记录
+  // unshift上去再提交，提交的这份数组天然就不包含数据库里任何一条真实旧记录。
+  // 拿它跟数据库真实全量car_finance做diff，必然会把所有业务员看不到的旧记录都
+  // 判定成"removed"——这根本不是业务员想删除任何东西，只是它没法在"整份数组"
+  // 这个模型里诚实表达"我只是想加"，导致业务员每次登记回款都会被误判成"想删除
+  // 全部记录"而被服务器拒绝（报"无权删除记录"）。这类角色本来就没有del权限，
+  // 下面mergeArrayUpdate也不会真的按这份"removed"去删任何东西，所以这里放行
+  // 不会造成真正的越权删除，只是不再冤枉它。
+  const isBlindAddOnly = perm.add === 'business_repay' && perm.edit === false && perm.del === false;
+  if (removed.length > 0 && !perm.del && !isBlindAddOnly) return { ok: false, reason: '无权删除记录' };
   if (edited.length > 0 && !perm.edit) return { ok: false, reason: '无权修改已有记录' };
   if (added.length > 0) {
     if (perm.add === true) { /* 允许 */ }
