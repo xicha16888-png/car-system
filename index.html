@@ -248,7 +248,7 @@ html,body{overflow:auto;height:auto}
 
 // ══ 版本号：老板每次改完系统、贴到GitHub部署新版之后，把这个数字改一下 ══
 // （改哪一位都行，只要跟上一个版本不一样，业务员浏览器就能感知到"有新版本"）
-var APP_VERSION = "20260928c";
+var APP_VERSION = "20260929a";
 var _pendingUpdate = false;   // 已经检测到线上有新版本，还没刷新
 var _updateSnoozed = false;   // 业务员点了"稍后"，先别再弹倒计时打扰他
 // 只在这些"纯浏览/看报表"页面允许直接自动刷新——凡是可能正在填表/登记的页面
@@ -3103,14 +3103,17 @@ function renderFinancePnL() {
 }
 
 function renderCashFlow() {
-  var cashRecords = _financeRecords.filter(function(r){return r.type==="income"||r.type==="expense";}); // 排除"提取存档"类型的记录，那不是真实现金收支
+  // ══ 与投资方合作分界（SETTLEMENT_CUTOFF）：现金流跟首页/利润表一致，永久只看
+  // SETTLEMENT_CUTOFF 起的流水——9/1前的钱已经在"历史结算存档"里一次性结清了，
+  // 不再滚进日常现金流的收支/余额，避免老账混进新账 ══
+  var cashRecords = _financeRecords.filter(function(r){return (r.type==="income"||r.type==="expense")&&isFromCutoff(r.date);}); // 排除"提取存档"类型记录 + 排除9/1前历史流水
   var sorted = cashRecords.slice().sort(function(a,b){ return a.date.localeCompare(b.date); });
   var running = 0; var flowData = [];
   for(var i=0;i<sorted.length;i++) { var r=sorted[i]; if(r.type==="income") running+=r.amount; else running-=r.amount; flowData.push({date:r.date,type:r.type,amount:r.amount,balance:running,category:r.category}); }
   var totalIncome = cashRecords.filter(function(r){return r.type==="income"}).reduce(function(s,r){return s+r.amount},0);
   var totalExpense = cashRecords.filter(function(r){return r.type==="expense"}).reduce(function(s,r){return s+r.amount},0);
   var balance = totalIncome - totalExpense;
-  var h = '<div class="page-header"><div class="page-title">💰 现金流</div><div class="page-sub">资金流水与余额变化</div></div>';
+  var h = '<div class="page-header"><div class="page-title">💰 现金流</div><div class="page-sub">资金流水与余额变化 · 只看 '+SETTLEMENT_CUTOFF+' 起的流水，之前的是历史数据，见<a href="javascript:void(0)" onclick="nav(\'settlement\')" style="color:var(--blue)">历史结算存档</a></div></div>';
   h += '<div class="stats-grid"><div class="stat-card green"><div class="stat-label">总收入</div><div class="stat-value">'+formatMoney(totalIncome)+'</div></div>';
   h += '<div class="stat-card red"><div class="stat-label">总支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div></div>';
   h += '<div class="stat-card blue"><div class="stat-label">当前余额</div><div class="stat-value">'+formatMoney(balance)+'</div></div>';
