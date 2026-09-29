@@ -112,7 +112,8 @@ tr:hover td{background:#f8faff}
 .mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;height:58px;background:linear-gradient(0deg,#0a1f42,#0f2d5c);z-index:300;flex-direction:row;align-items:stretch;border-top:1px solid rgba(255,255,255,.12)}
 .mob-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;color:rgba(255,255,255,.5);font-size:10px;transition:color .15s;padding:4px 2px;-webkit-tap-highlight-color:transparent}
 .mob-nav-item.active{color:#64b5f6}
-.mob-nav-item .mi{font-size:22px;line-height:1}
+.mob-nav-item .mi{font-size:22px;line-height:1;position:relative}
+.mob-nav-item .mi .mi-badge{position:absolute;top:-6px;right:-10px;background:var(--red);color:#fff;font-size:9px;font-weight:700;line-height:1;padding:2px 4px;border-radius:8px;min-width:14px;text-align:center}
 .mob-more-panel{display:none;position:fixed;bottom:58px;left:0;right:0;background:#fff;z-index:299;border-top:1px solid #e0e0e0;box-shadow:0 -6px 24px rgba(0,0,0,.12);border-radius:18px 18px 0 0;padding:6px 0 14px}
 .mob-more-panel.open{display:block}
 .mob-more-item{display:flex;align-items:center;gap:14px;padding:14px 24px;font-size:14px;cursor:pointer;color:var(--text);-webkit-tap-highlight-color:transparent}
@@ -218,7 +219,7 @@ html,body{overflow:auto;height:auto}
   <div class="mob-nav-item" id="mn_home" onclick="nav('home')"><span class="mi">🏠</span>首页</div>
   <div class="mob-nav-item" id="mn_add" onclick="nav('add')"><span class="mi">➕</span>新增</div>
   <div class="mob-nav-item" id="mn_list" onclick="nav('list')"><span class="mi">📋</span>列表</div>
-  <div class="mob-nav-item" id="mn_overdue" onclick="nav('overdue')"><span class="mi">⚠️</span>逾期</div>
+  <div class="mob-nav-item" id="mn_overdue" onclick="nav('overdue')"><span class="mi">⚠️<span class="mi-badge" id="mnOverdueBadge" style="display:none"></span></span>逾期</div>
   <div class="mob-nav-item" onclick="toggleMobMore()"><span class="mi">☰</span>更多</div>
 </div>
 <div class="mob-more-panel" id="mobMorePanel">
@@ -248,7 +249,7 @@ html,body{overflow:auto;height:auto}
 
 // ══ 版本号：老板每次改完系统、贴到GitHub部署新版之后，把这个数字改一下 ══
 // （改哪一位都行，只要跟上一个版本不一样，业务员浏览器就能感知到"有新版本"）
-var APP_VERSION = "20260929a";
+var APP_VERSION = "20260929b";
 var _pendingUpdate = false;   // 已经检测到线上有新版本，还没刷新
 var _updateSnoozed = false;   // 业务员点了"稍后"，先别再弹倒计时打扰他
 // 只在这些"纯浏览/看报表"页面允许直接自动刷新——凡是可能正在填表/登记的页面
@@ -589,6 +590,12 @@ function buildMobNav() {
   var map={home:"mn_home",add:"mn_add",list:"mn_list",overdue:"mn_overdue"};
   ["mn_home","mn_add","mn_list","mn_overdue"].forEach(function(id){var el=document.getElementById(id);if(el)el.classList.remove("active");});
   if(map[_currentNav]){var el=document.getElementById(map[_currentNav]);if(el)el.classList.add("active");}
+  var badgeEl = document.getElementById("mnOverdueBadge");
+  if(badgeEl) {
+    var cnt = loanRecords().filter(isLoanOverdue).length;
+    if(cnt>0) { badgeEl.style.display=""; badgeEl.textContent=cnt>99?"99+":cnt; }
+    else { badgeEl.style.display="none"; }
+  }
 }
 function toggleMobMore(){var p=document.getElementById("mobMorePanel");if(p)p.classList.toggle("open");}
 function closeMobMore(){var p=document.getElementById("mobMorePanel");if(p)p.classList.remove("open");}
@@ -1296,7 +1303,7 @@ function buildSidebar() {
     items.push({id:"finance_expense", icon:"💸", label:canAddFinance()?"支出登记":"支出记录（只读）"});
   }
   items.push({sec:"风控提醒"});
-  items.push({id:"overdue", icon:"⚠️", label:"逾期催收"});
+  items.push({id:"overdue", icon:"⚠️", label:"逾期催收", badge:loanRecords().filter(isLoanOverdue).length});
   if(isBoss()) {
     items.push({sec:"系统设置"});
     items.push({id:"data_check", icon:"🔍", label:"数据体检"});
@@ -1311,7 +1318,8 @@ function buildSidebar() {
     if(it.sec) { h += '<div class="sb-label">'+it.sec+'</div>'; }
     else {
       var cls = (it.id===_currentNav) ? "nav-item active" : "nav-item";
-      h += '<div class="'+cls+'" onclick="nav(\''+it.id+'\')"><span class="nav-icon">'+it.icon+'</span>'+it.label+'</div>';
+      var badgeHtml = (it.badge>0) ? '<span class="nav-badge">'+it.badge+'</span>' : '';
+      h += '<div class="'+cls+'" onclick="nav(\''+it.id+'\')"><span class="nav-icon">'+it.icon+'</span>'+it.label+badgeHtml+'</div>';
     }
   }
   document.getElementById("sidebarEl").innerHTML = h;
