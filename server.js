@@ -45,11 +45,19 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // 第一次启动、数据库里还没有 car_users 这个key时，会用它来建立最初的
 // 三个账号；之后账号管理全部走数据库，改这个数组不会再生效。
 // ══════════════════════════════════════════════════════════
+// 2026-10：'gui'/'boss' 原来是同一个账号的两个登录别名，导致操作日志分不清
+// 是谁操作的——拆成两个独立账号：'boss' 是老板本人（超级管理员，系统设置全看），
+// 'gui' 是贵（普通老板权限，但看不了系统设置）。见下面 splitMultiAliasAccounts()，
+// 已有数据库数据的话由那边做一次性拆分迁移，这里只影响全新部署。
 const USERS_RAW = [
-  { usernames: ['gui', 'boss'], password: 'gui',    role: 'boss',    displayName: '老板' },
+  { usernames: ['boss'], password: 'gui',    role: 'boss',    displayName: '老板', isSuperAdmin: true },
+  { usernames: ['gui'],  password: 'gui',    role: 'boss',    displayName: '贵',   isSuperAdmin: false },
   { usernames: ['caiwu'],       password: 'gui888', role: 'finance', displayName: '财务' },
   { usernames: ['yewu'],        password: 'yewu888', role: 'sales',   displayName: '业务员' },
 ];
+// 迁移专用：账号被拆分后，新账号默认显示姓名 = 用户名，这里给几个已知的用户名
+// 起更好认的姓名；没命中的就用用户名本身兜底，老板之后可以在账号管理里自己改名。
+const ALIAS_DISPLAY_NAME_HINTS = { gui: '贵' };
 const VALID_ROLES = ['boss', 'finance', 'sales'];
 
 function hashPassword(password, salt) {
@@ -83,34 +91,75 @@ async function persistUsers() {
   const { error } = await supabase.from('pawndata').upsert([{ key: 'car_users', value: USER_RECORDS }], { onConflict: 'key' });
   if (error) throw new Error('DB_WRITE_ERROR: ' + error.message);
 }
+// 拆分时，如果这几个用户名里有一个是"boss"，那个才是真正的超级管理员身份，
+// 必须留在原账号上（不能简单掐数组第一个——种子数据里 usernames 是
+// ['gui','boss']，'gui' 排第一但不该是留下来的那个）
+const PREFERRED_PRIMARY_USERNAME = 'boss';
+// 一次性迁移：①某个账号如果挂了不止一个登录用户名（历史遗留，比如'gui'和'boss'
+// 曾经是同一个账号的两个别名），拆成各自独立的账号，不然操作日志永远分不清谁是谁；
+// 拆出来的新账号默认 isSuperAdmin:false（不给系统设置权限，按需要老板自己加回去）。
+// ②老账号如果压根没有 isSuperAdmin 这个字段（这个权限是后来才加的），老板角色
+// 默认当成 true，不改变这些账号现有的使用习惯。返回是否有改动，有改动调用方要存库。
+function splitMultiAliasAccounts() {
+  var changed = false;
+  var newRecords = [];
+  USER_RECORDS.forEach(function(rec) {
+    if (rec.role === 'boss' && rec.isSuperAdmin === undefined) {
+      rec.isSuperAdmin = true;
+      changed = true;
+    }
+    if (Array.isArray(rec.usernames) && rec.usernames.length > 1) {
+      var keep = rec.usernames.indexOf(PREFERRED_PRIMARY_USERNAME) !== -1 ? PREFERRED_PRIMARY_USERNAME : rec.usernames[0];
+      var extras = rec.usernames.filter(function(u){ return u !== keep; });
+      rec.usernames = [keep];
+      extras.forEach(function(alias) {
+        newRecords.push({
+          id: genUserId(), usernames: [alias], displayName: ALIAS_DISPLAY_NAME_HINTS[alias] || alias,
+          role: rec.role, status: rec.status, passwordHash: rec.passwordHash,
+          isSuperAdmin: false, createdAt: new Date().toISOString()
+        });
+      });
+      console.log('  账号：「' + rec.displayName + '」账号原本有多个登录别名（' + [keep].concat(extras).join('/') + '），已拆分成独立账号');
+      changed = true;
+    }
+  });
+  if (newRecords.length > 0) USER_RECORDS = USER_RECORDS.concat(newRecords);
+  return changed;
+}
 async function initUsers() {
   try {
     const { data, error } = await supabase.from('pawndata').select('value').eq('key', 'car_users').maybeSingle();
     if (!error && data && Array.isArray(data.value) && data.value.length > 0) {
       USER_RECORDS = data.value;
       console.log(`  账号：已从数据库加载 ${USER_RECORDS.length} 个账号`);
+      if (splitMultiAliasAccounts()) { await persistUsers(); console.log('  账号：账号拆分迁移已保存'); }
     } else {
       USER_RECORDS = USERS_RAW.map(u => ({
         id: genUserId(), usernames: u.usernames.slice(), displayName: u.displayName,
-        role: u.role, status: 'active', passwordHash: hashPassword(u.password), createdAt: new Date().toISOString()
+        role: u.role, status: 'active', passwordHash: hashPassword(u.password), isSuperAdmin: !!u.isSuperAdmin, createdAt: new Date().toISOString()
       }));
       await persistUsers();
-      console.log('  账号：数据库中未找到账号数据，已写入初始种子账号（gui/boss, caiwu, yewu）');
+      console.log('  账号：数据库中未找到账号数据，已写入初始种子账号（boss, gui, caiwu, yewu）');
     }
   } catch (e) {
     console.error('  账号：初始化失败，使用内存种子账号兜底：', e.message);
     USER_RECORDS = USERS_RAW.map(u => ({
       id: genUserId(), usernames: u.usernames.slice(), displayName: u.displayName,
-      role: u.role, status: 'active', passwordHash: hashPassword(u.password), createdAt: new Date().toISOString()
+      role: u.role, status: 'active', passwordHash: hashPassword(u.password), isSuperAdmin: !!u.isSuperAdmin, createdAt: new Date().toISOString()
     }));
   }
   rebuildUserIndex();
 }
 function sanitizeUser(rec) {
-  return { id: rec.id, username: rec.usernames[0], usernames: rec.usernames, displayName: rec.displayName, role: rec.role, status: rec.status, createdAt: rec.createdAt };
+  return { id: rec.id, username: rec.usernames[0], usernames: rec.usernames, displayName: rec.displayName, role: rec.role, status: rec.status, isSuperAdmin: !!rec.isSuperAdmin, createdAt: rec.createdAt };
 }
 function activeBossCount() {
   return USER_RECORDS.filter(r => r.role === 'boss' && r.status === 'active').length;
+}
+// 系统设置（账号管理/操作日志/备份/恢复/数据体检）比普通老板权限更高一层——
+// 不是所有"老板"角色的账号都能看，只有 isSuperAdmin:true 的才行
+function activeSuperAdminCount() {
+  return USER_RECORDS.filter(r => r.role === 'boss' && r.status === 'active' && r.isSuperAdmin === true).length;
 }
 function invalidateSessionsFor(usernames) {
   sessions.forEach((sess, token) => { if (usernames.indexOf(sess.username) !== -1) sessions.delete(token); });
@@ -142,8 +191,8 @@ app.post('/api/login', (req, res) => {
     return res.status(401).json({ error: 'ACCOUNT_DISABLED', message: '此账号已被禁用，请联系管理员' });
   }
   const token = crypto.randomBytes(24).toString('hex');
-  sessions.set(token, { username: String(username).trim(), role: rec.role, displayName: rec.displayName, ts: Date.now() });
-  res.json({ ok: true, token, role: rec.role, displayName: rec.displayName, username: String(username).trim() });
+  sessions.set(token, { username: String(username).trim(), role: rec.role, displayName: rec.displayName, isSuperAdmin: !!rec.isSuperAdmin, ts: Date.now() });
+  res.json({ ok: true, token, role: rec.role, displayName: rec.displayName, username: String(username).trim(), isSuperAdmin: !!rec.isSuperAdmin });
 });
 
 app.post('/api/logout', auth, (req, res) => {
@@ -154,20 +203,21 @@ app.post('/api/logout', auth, (req, res) => {
 });
 
 app.get('/api/me', auth, (req, res) => {
-  res.json({ ok: true, username: req.user.username, role: req.user.role, displayName: req.user.displayName });
+  res.json({ ok: true, username: req.user.username, role: req.user.role, displayName: req.user.displayName, isSuperAdmin: !!req.user.isSuperAdmin });
 });
 
-// ══ 账号管理（老板专属：自己新增/改角色/重置密码/启用禁用/删除员工账号）══
-function requireBoss(req, res) {
-  if (req.user.role !== 'boss') { res.status(403).json({ error: 'PERMISSION_DENIED', message: '只有老板能管理账号' }); return false; }
+// ══ 账号管理（系统设置专属：只有 isSuperAdmin:true 的老板账号能自己新增/改角色/
+// 重置密码/启用禁用/删除员工账号——普通老板角色账号看不到、也调不了这几个接口）══
+function requireSuperAdmin(req, res) {
+  if (req.user.role !== 'boss' || !req.user.isSuperAdmin) { res.status(403).json({ error: 'PERMISSION_DENIED', message: '只有系统管理员能管理账号' }); return false; }
   return true;
 }
 app.get('/api/users', auth, (req, res) => {
-  if (!requireBoss(req, res)) return;
+  if (!requireSuperAdmin(req, res)) return;
   res.json({ ok: true, users: USER_RECORDS.map(sanitizeUser) });
 });
 app.post('/api/users', auth, async (req, res) => {
-  if (!requireBoss(req, res)) return;
+  if (!requireSuperAdmin(req, res)) return;
   try {
     const username = String((req.body || {}).username || '').trim();
     const displayName = String((req.body || {}).displayName || '').trim() || username;
@@ -179,16 +229,18 @@ app.post('/api/users', auth, async (req, res) => {
     const lower = username.toLowerCase();
     const dup = USER_RECORDS.some(r => (r.usernames || []).some(n => n.toLowerCase() === lower));
     if (dup) return res.status(400).json({ error: 'DUP_USERNAME', message: '这个用户名已经被使用了' });
-    const rec = { id: genUserId(), usernames: [username], displayName, role, status: 'active', passwordHash: hashPassword(password), createdAt: new Date().toISOString() };
+    // 新建的老板角色账号默认不给系统设置权限（isSuperAdmin:false），要的话前端勾选
+    const isSuperAdmin = role === 'boss' && !!(req.body || {}).isSuperAdmin;
+    const rec = { id: genUserId(), usernames: [username], displayName, role, status: 'active', passwordHash: hashPassword(password), isSuperAdmin: isSuperAdmin, createdAt: new Date().toISOString() };
     USER_RECORDS.push(rec);
     await persistUsers();
     rebuildUserIndex();
-    await logAccountChange(req.user, 'add', displayName + '（' + username + '）', '新增账号，角色：' + role);
+    await logAccountChange(req.user, 'add', displayName + '（' + username + '）', '新增账号，角色：' + role + (isSuperAdmin?'（系统管理员）':''));
     res.json({ ok: true, user: sanitizeUser(rec) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/users/:id/reset-password', auth, async (req, res) => {
-  if (!requireBoss(req, res)) return;
+  if (!requireSuperAdmin(req, res)) return;
   try {
     const rec = USER_RECORDS.find(r => r.id === req.params.id);
     if (!rec) return res.status(404).json({ error: 'NOT_FOUND', message: '账号不存在' });
@@ -203,7 +255,7 @@ app.post('/api/users/:id/reset-password', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/users/:id/update', auth, async (req, res) => {
-  if (!requireBoss(req, res)) return;
+  if (!requireSuperAdmin(req, res)) return;
   try {
     const rec = USER_RECORDS.find(r => r.id === req.params.id);
     if (!rec) return res.status(404).json({ error: 'NOT_FOUND', message: '账号不存在' });
@@ -219,6 +271,20 @@ app.post('/api/users/:id/update', auth, async (req, res) => {
       }
       if (role !== rec.role) changeNotes.push('角色改为' + role);
       rec.role = role;
+      if (role !== 'boss' && rec.isSuperAdmin) rec.isSuperAdmin = false; // 不是老板角色了，系统管理员权限没意义，一起清掉
+    }
+    if (body.isSuperAdmin !== undefined) {
+      const wantSuperAdmin = !!body.isSuperAdmin;
+      // rec.role 这时候已经是上面 role 分支处理完之后的最新值了（如果这次请求也带了
+      // role 字段的话），所以这里直接判断 rec.role 就够，不用再单独理会 body.role
+      if (wantSuperAdmin && rec.role !== 'boss') {
+        return res.status(400).json({ error: 'BAD_INPUT', message: '只有老板角色的账号能设为系统管理员' });
+      }
+      if (!wantSuperAdmin && rec.isSuperAdmin && rec.status === 'active' && activeSuperAdminCount() <= 1) {
+        return res.status(400).json({ error: 'LAST_SUPER_ADMIN', message: '系统至少要保留一个系统管理员账号，否则没人能再管理账号/看操作日志' });
+      }
+      if (wantSuperAdmin !== rec.isSuperAdmin) changeNotes.push(wantSuperAdmin ? '设为系统管理员' : '取消系统管理员');
+      rec.isSuperAdmin = wantSuperAdmin;
     }
     if (body.status !== undefined) {
       const status = String(body.status).trim();
@@ -226,6 +292,9 @@ app.post('/api/users/:id/update', auth, async (req, res) => {
       if (isSelf && status === 'disabled') return res.status(400).json({ error: 'SELF_LOCK', message: '不能禁用自己正在登录的账号' });
       if (rec.role === 'boss' && status === 'disabled' && activeBossCount() <= 1) {
         return res.status(400).json({ error: 'LAST_BOSS', message: '系统至少要保留一个启用中的老板账号' });
+      }
+      if (rec.isSuperAdmin && status === 'disabled' && activeSuperAdminCount() <= 1) {
+        return res.status(400).json({ error: 'LAST_SUPER_ADMIN', message: '系统至少要保留一个启用中的系统管理员账号' });
       }
       if (status !== rec.status) changeNotes.push(status === 'disabled' ? '禁用了账号' : '启用了账号');
       rec.status = status;
@@ -242,7 +311,7 @@ app.post('/api/users/:id/update', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.delete('/api/users/:id', auth, async (req, res) => {
-  if (!requireBoss(req, res)) return;
+  if (!requireSuperAdmin(req, res)) return;
   try {
     const rec = USER_RECORDS.find(r => r.id === req.params.id);
     if (!rec) return res.status(404).json({ error: 'NOT_FOUND', message: '账号不存在' });
@@ -250,6 +319,9 @@ app.delete('/api/users/:id', auth, async (req, res) => {
     if (isSelf) return res.status(400).json({ error: 'SELF_LOCK', message: '不能删除自己正在登录的账号' });
     if (rec.role === 'boss' && rec.status === 'active' && activeBossCount() <= 1) {
       return res.status(400).json({ error: 'LAST_BOSS', message: '系统至少要保留一个启用中的老板账号' });
+    }
+    if (rec.isSuperAdmin && rec.status === 'active' && activeSuperAdminCount() <= 1) {
+      return res.status(400).json({ error: 'LAST_SUPER_ADMIN', message: '系统至少要保留一个启用中的系统管理员账号' });
     }
     USER_RECORDS = USER_RECORDS.filter(r => r.id !== rec.id);
     await persistUsers();
@@ -510,9 +582,9 @@ app.post('/api/data', auth, async (req, res) => {
   }
 });
 
-// 操作日志（只有老板能看，追踪谁新增/编辑/删除了哪条贷款或财务记录）
+// 操作日志（只有系统管理员能看，追踪谁新增/编辑/删除了哪条贷款或财务记录）
 app.get('/api/oplog', auth, async (req, res) => {
-  if (req.user.role !== 'boss') return res.status(403).json({ error: 'PERMISSION_DENIED', message: '只有老板能查看操作日志' });
+  if (req.user.role !== 'boss' || !req.user.isSuperAdmin) return res.status(403).json({ error: 'PERMISSION_DENIED', message: '只有系统管理员能查看操作日志' });
   res.json({ ok: true, log: OPLOG });
 });
 
