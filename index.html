@@ -219,7 +219,7 @@ html,body{overflow:auto;height:auto}
   <div class="mob-nav-item" id="mn_home" onclick="nav('home')"><span class="mi">🏠</span>首页</div>
   <div class="mob-nav-item" id="mn_add" onclick="nav('add')"><span class="mi">➕</span>新增</div>
   <div class="mob-nav-item" id="mn_list" onclick="nav('list')"><span class="mi">📋</span>列表</div>
-  <div class="mob-nav-item" id="mn_overdue" onclick="nav('overdue')"><span class="mi">⚠️<span class="mi-badge" id="mnOverdueBadge" style="display:none"></span></span>逾期</div>
+  <div class="mob-nav-item" id="mn_overdue" onclick="nav('overdue')"><span class="mi">⚠️<span class="mi-badge" id="mnOverdueBadge" style="display:none"></span></span>利息逾期</div>
   <div class="mob-nav-item" onclick="toggleMobMore()"><span class="mi">☰</span>更多</div>
 </div>
 <div class="mob-more-panel" id="mobMorePanel">
@@ -249,7 +249,7 @@ html,body{overflow:auto;height:auto}
 
 // ══ 版本号：老板每次改完系统、贴到GitHub部署新版之后，把这个数字改一下 ══
 // （改哪一位都行，只要跟上一个版本不一样，业务员浏览器就能感知到"有新版本"）
-var APP_VERSION = "20261001a";
+var APP_VERSION = "20261001c";
 var _pendingUpdate = false;   // 已经检测到线上有新版本，还没刷新
 var _updateSnoozed = false;   // 业务员点了"稍后"，先别再弹倒计时打扰他
 // 只在这些"纯浏览/看报表"页面允许直接自动刷新——凡是可能正在填表/登记的页面
@@ -277,7 +277,7 @@ var _syncStatus = "idle";
 // 三个角色：boss 老板(全权) / sales 业务员(只管贷款+收购车辆业务) /
 // finance 财务(能看全部，只能新增收支登记，不能改/删任何东西)
 // ══════════════════════════════════════════════
-var AUTH_TOKEN = null, CURRENT_ROLE = null, CURRENT_USERNAME = null, CURRENT_DISPLAY = null;
+var AUTH_TOKEN = null, CURRENT_ROLE = null, CURRENT_USERNAME = null, CURRENT_DISPLAY = null, CURRENT_IS_SUPER_ADMIN = false;
 var ROLE_LABEL = {boss:"老板", finance:"财务", sales:"业务员"};
 
 function authHeaders() { return AUTH_TOKEN ? {"Authorization":"Bearer "+AUTH_TOKEN} : {}; }
@@ -299,11 +299,16 @@ function canViewFinance() { return CURRENT_ROLE==="boss" || CURRENT_ROLE==="fina
 function canAddFinance() { return CURRENT_ROLE==="boss"; } // 财务只读：连新增收支登记都不行，记账只能老板（或业务员卖收购车那笔特例）做
 function canEditFinance() { return CURRENT_ROLE==="boss"; }
 function isBoss() { return CURRENT_ROLE==="boss"; }
+// ══ 系统设置（账号管理/操作日志/备份/恢复/数据体检）══ 2026-10新增：不是所有
+// "老板"角色的账号都能看——只有被设为"系统管理员"的那个（isSuperAdmin）才行，
+// 这样一个账号给合伙人/投资人用（能看全部业务数据），另一个账号留给真正管系统
+// 的人，两边权限不一样，操作日志也能分清是谁动的
+function isSuperAdmin() { return CURRENT_ROLE==="boss" && CURRENT_IS_SUPER_ADMIN===true; }
 
 function showLoginScreen(msg) {
   document.getElementById("loginScreen").style.display = "flex";
   document.getElementById("loginError").textContent = msg || "";
-  AUTH_TOKEN = null; CURRENT_ROLE = null; CURRENT_USERNAME = null; CURRENT_DISPLAY = null;
+  AUTH_TOKEN = null; CURRENT_ROLE = null; CURRENT_USERNAME = null; CURRENT_DISPLAY = null; CURRENT_IS_SUPER_ADMIN = false;
   try{ localStorage.removeItem("car_auth_token"); }catch(e){}
   var pass = document.getElementById("loginPass"); if(pass) pass.value = "";
 }
@@ -321,7 +326,7 @@ async function doLogin() {
     var res = await fetch("/api/login", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({username:user, password:pass})});
     var data = await res.json();
     if(!res.ok || !data.ok) { errEl.textContent = data.message || "登录失败"; btn.disabled=false; btn.textContent="登 录"; return; }
-    AUTH_TOKEN = data.token; CURRENT_ROLE = data.role; CURRENT_USERNAME = data.username; CURRENT_DISPLAY = data.displayName || ROLE_LABEL[data.role] || data.role;
+    AUTH_TOKEN = data.token; CURRENT_ROLE = data.role; CURRENT_USERNAME = data.username; CURRENT_DISPLAY = data.displayName || ROLE_LABEL[data.role] || data.role; CURRENT_IS_SUPER_ADMIN = !!data.isSuperAdmin;
     try{ localStorage.setItem("car_auth_token", AUTH_TOKEN); }catch(e){}
     hideLoginScreen();
     startApp();
@@ -346,7 +351,7 @@ async function tryResumeSession() {
     var res = await fetch("/api/me", {headers: authHeaders()});
     if(!res.ok) throw new Error("invalid session");
     var data = await res.json();
-    CURRENT_ROLE = data.role; CURRENT_USERNAME = data.username; CURRENT_DISPLAY = data.displayName || ROLE_LABEL[data.role] || data.role;
+    CURRENT_ROLE = data.role; CURRENT_USERNAME = data.username; CURRENT_DISPLAY = data.displayName || ROLE_LABEL[data.role] || data.role; CURRENT_IS_SUPER_ADMIN = !!data.isSuperAdmin;
     hideLoginScreen();
     startApp();
   } catch(e) {
@@ -360,6 +365,7 @@ var SETTLEMENT_CUTOFF = "2026-09-01";
 
 
 function doBackup() {
+  if(!isSuperAdmin()) { alert("⛔ 只有系统管理员能备份数据"); return; }
   var today = new Date().toISOString().slice(0,10);
   var j = JSON.stringify({car_loans:_loans, car_finance:_financeRecords},null,2);
   var a = document.createElement("a");
@@ -374,7 +380,7 @@ function doBackup() {
   setTimeout(function(){alert("✅ 备份完成！已下载3个文件");},800);
 }
 function doRestore() {
-  if(!isBoss()) { alert("⛔ 只有老板能恢复数据"); return; }
+  if(!isSuperAdmin()) { alert("⛔ 只有系统管理员能恢复数据"); return; }
   var inp=document.createElement("input");inp.type="file";inp.accept=".json";
   inp.onchange=function(e){
     var file=e.target.files[0];if(!file)return;
@@ -420,7 +426,7 @@ async function loadUsers() {
 }
 
 async function renderUserManage() {
-  if(!isBoss()) { alert("⛔ 只有老板能管理账号"); nav("home"); return; }
+  if(!isSuperAdmin()) { alert("⛔ 只有系统管理员能管理账号"); nav("home"); return; }
   document.getElementById('mainContent').innerHTML = '<div class="card" style="text-align:center;padding:50px;color:var(--muted)">加载中...</div>';
   await loadUsers();
   renderUserManageBody();
@@ -446,6 +452,7 @@ function renderUserManageBody() {
     h+='<div class="form-group"><label>显示姓名</label><input type="text" id="u_displayName" placeholder="如：小李，不填则用用户名"></div>';
     h+='<div class="form-group"><label>角色 *</label><select id="u_role"><option value="sales">业务员</option><option value="finance">财务</option><option value="boss">老板</option></select></div>';
     h+='<div class="form-group"><label>初始密码 *</label><input type="text" id="u_password" placeholder="至少4位，之后本人可让老板重置"></div>';
+    h+='<div class="form-group"><label style="display:flex;align-items:center;gap:6px;font-weight:400"><input type="checkbox" id="u_isSuperAdmin" style="width:auto"> 授予系统设置权限<span style="font-size:11px;color:var(--muted)">（数据体检/账号管理/操作日志/备份恢复，仅角色选"老板"时生效，不勾选的话这个账号看不到这几个页面）</span></label></div>';
     h+='</div>';
     h+='<div class="btn-row"><button class="btn btn-primary" onclick="createUserAccount()">✅ 保存账号</button></div></div>';
   }
@@ -462,7 +469,7 @@ function renderUserManageBody() {
       var isActive = u.status==='active';
       h+='<tr>';
       h+='<td style="font-family:monospace;font-weight:600">'+u.usernames.join(' / ')+(isSelf?' <span class="badge badge-blue" style="margin-left:4px">我</span>':'')+'</td>';
-      h+='<td>'+(u.displayName||'—')+'</td>';
+      h+='<td>'+(u.displayName||'—')+(u.role==='boss'&&u.isSuperAdmin?' <span class="badge badge-blue" style="margin-left:4px">🔑系统管理员</span>':'')+'</td>';
       h+='<td>'+(isActive?'<span class="badge badge-green">启用中</span>':'<span class="badge badge-gray">已禁用</span>')+'</td>';
       h+='<td style="font-size:12px;color:var(--muted)">'+formatDate(u.createdAt)+'</td>';
       h+='<td style="white-space:nowrap">';
@@ -472,6 +479,9 @@ function renderUserManageBody() {
       h+='<option value="sales" '+(u.role==='sales'?'selected':'')+'>业务员</option>';
       h+='</select>';
       h+='<button class="btn btn-sm btn-outline" onclick="promptResetPassword(\''+u.id+'\',\''+(u.displayName||u.username)+'\')">🔑 重置密码</button> ';
+      if(u.role==='boss') {
+        h+='<button class="btn btn-sm '+(u.isSuperAdmin?'btn-outline':'btn-success')+'" '+(isSelf?'disabled title="不能修改自己的系统设置权限，请用另一个系统管理员账号操作"':'onclick="toggleSuperAdmin(\''+u.id+'\','+(!u.isSuperAdmin)+',\''+(u.displayName||u.username)+'\')"')+'>'+(u.isSuperAdmin?'🔒 取消系统管理员':'🔑 设为系统管理员')+'</button> ';
+      }
       if(!isSelf) {
         h+='<button class="btn btn-sm '+(isActive?'btn-outline':'btn-success')+'" onclick="toggleUserStatus(\''+u.id+'\',\''+u.status+'\',\''+(u.displayName||u.username)+'\')">'+(isActive?'🚫 禁用':'✅ 启用')+'</button> ';
         h+='<button class="btn btn-sm btn-danger" onclick="deleteUserAccount(\''+u.id+'\',\''+(u.displayName||u.username)+'\')">删除</button>';
@@ -493,7 +503,8 @@ async function createUserAccount() {
   var password = document.getElementById("u_password")?.value;
   if(!username) { alert("请输入用户名"); return; }
   if(!password || password.length<4) { alert("密码至少4位"); return; }
-  var data = await apiUsersCall("/api/users", "POST", {username:username, displayName:displayName, role:role, password:password});
+  var isSuperAdmin = document.getElementById("u_isSuperAdmin")?.checked || false;
+  var data = await apiUsersCall("/api/users", "POST", {username:username, displayName:displayName, role:role, password:password, isSuperAdmin:isSuperAdmin});
   if(data) { alert("✅ 账号创建成功：「"+username+"」"); _userFormOpen=false; await loadUsers(); renderUserManageBody(); }
 }
 
@@ -509,6 +520,11 @@ async function updateUserRole(id, role, label) {
   if(!confirm("确定把「"+label+"」的角色改为「"+(ROLE_LABEL[role]||role)+"」？该账号会被强制重新登录。")) { renderUserManageBody(); return; }
   await apiUsersCall("/api/users/"+id+"/update", "POST", {role:role});
   await loadUsers(); renderUserManageBody();
+}
+async function toggleSuperAdmin(id, grant, label) {
+  if(!confirm(grant?("确定给「"+label+"」开通系统设置权限（数据体检/账号管理/操作日志/备份恢复）？"):("确定取消「"+label+"」的系统设置权限？")+"")) return;
+  var data = await apiUsersCall("/api/users/"+id+"/update", "POST", {isSuperAdmin:grant});
+  if(data) { await loadUsers(); renderUserManageBody(); }
 }
 
 async function toggleUserStatus(id, currentStatus, label) {
@@ -532,7 +548,7 @@ var _oplogFilter = {dataKey:"", action:"", username:""};
 var OPLOG_ACTION_LABEL = {add:"➕ 新增", edit:"✏️ 编辑", delete:"🗑️ 删除"};
 var OPLOG_KEY_LABEL = {car_loans:"贷款/收购车辆", car_finance:"财务记录", car_users:"账号管理"};
 async function renderOplog() {
-  if(!isBoss()) { alert("⛔ 只有老板能查看操作日志"); nav("home"); return; }
+  if(!isSuperAdmin()) { alert("⛔ 只有系统管理员能查看操作日志"); nav("home"); return; }
   document.getElementById('mainContent').innerHTML = '<div class="card" style="text-align:center;padding:50px;color:var(--muted)">加载中...</div>';
   var data = await apiUsersCall("/api/oplog");
   _oplog = (data && data.log) || [];
@@ -1265,7 +1281,7 @@ function calcMonthly(amount, rate, term, repay) {
 }
 
 function statusHtml(s) {
-  var m = {active:["还款中","badge-green"], pending:["审核中","badge-amber"], overdue:["已逾期","badge-red"], closed:["已结清","badge-gray"]};
+  var m = {active:["还款中","badge-green"], pending:["审核中","badge-amber"], overdue:["利息逾期","badge-red"], closed:["已结清","badge-gray"]};
   var r = m[s] || ["未知","badge-amber"];
   return "<span class=\"badge "+r[1]+"\">"+r[0]+"</span>";
 }
@@ -1306,8 +1322,8 @@ function buildSidebar() {
     items.push({id:"finance_expense", icon:"💸", label:canAddFinance()?"支出登记":"支出记录（只读）"});
   }
   items.push({sec:"风控提醒"});
-  items.push({id:"overdue", icon:"⚠️", label:"逾期催收", badge:loanRecords().filter(isLoanOverdue).length});
-  if(isBoss()) {
+  items.push({id:"overdue", icon:"⚠️", label:"利息逾期催收", badge:loanRecords().filter(isLoanOverdue).length});
+  if(isSuperAdmin()) {
     items.push({sec:"系统设置"});
     items.push({id:"data_check", icon:"🔍", label:"数据体检"});
     items.push({id:"user_manage", icon:"👥", label:"账号管理"});
@@ -1331,7 +1347,7 @@ function buildSidebar() {
 // ══ 页面级权限校验（前端拦截，真正的数据保护在服务器）══
 var PAGE_REQUIRES = {
   add:"writeLoans", acquired_add:"writeLoans", import:"writeLoans", repay_collect:"writeLoans",
-  backup:"boss", restore:"boss", user_manage:"boss", data_check:"boss", oplog:"boss",
+  backup:"superAdmin", restore:"superAdmin", user_manage:"superAdmin", data_check:"superAdmin", oplog:"superAdmin",
   finance_pnl:"viewFinance", settlement:"viewFinance", finance_cashflow:"viewFinance",
   haircut_detail:"viewFinance", interest_detail:"viewFinance", profit_detail:"viewFinance", middleman_detail:"viewFinance",
   finance_income:"viewFinance", finance_expense:"viewFinance"
@@ -1340,6 +1356,7 @@ function pageAllowed(page) {
   var req = PAGE_REQUIRES[page];
   if(!req) return true;
   if(req==="boss") return isBoss();
+  if(req==="superAdmin") return isSuperAdmin();
   if(req==="writeLoans") return canWriteLoans();
   if(req==="viewFinance") return canViewFinance();
   if(req==="addFinance") return canAddFinance();
@@ -1638,7 +1655,7 @@ function renderHome() {
   h += '<div class="stat-card blue"><div class="stat-icon">📄</div><div class="stat-label">合同总数</div><div class="stat-value">'+total+'</div><div class="stat-sub">笔贷款</div></div>';
   h += '<div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-label">还款中</div><div class="stat-value">'+active+'</div><div class="stat-sub">笔</div></div>';
   h += '<div class="stat-card amber"><div class="stat-icon">⏳</div><div class="stat-label">审核中</div><div class="stat-value">'+pending+'</div><div class="stat-sub">笔</div></div>';
-  h += '<div class="stat-card red"><div class="stat-icon">⚠️</div><div class="stat-label">已逾期</div><div class="stat-value">'+overdue+'</div><div class="stat-sub">笔</div></div>';
+  h += '<div class="stat-card red"><div class="stat-icon">⚠️</div><div class="stat-label">利息逾期</div><div class="stat-value">'+overdue+'</div><div class="stat-sub">笔 · 车辆在手，本金无风险</div></div>';
   if(canViewFinance()) {
     h += '<div class="stat-card purple" style="cursor:pointer" onclick="nav(\'interest_detail\')"><div class="stat-icon">💰</div><div class="stat-label">利息收入</div><div class="stat-value">'+formatMoney(totalInterestIncome)+'</div><div class="stat-sub">不含本金回收 · 点击查看明细</div></div>';
     h += '<div class="stat-card amber" style="cursor:pointer" onclick="nav(\'haircut_detail\')"><div class="stat-icon">✂️</div><div class="stat-label">砍头息</div><div class="stat-value">'+formatMoney(totalHaircut)+'</div><div class="stat-sub">合同自动归集 · 点击查看明细</div></div>';
@@ -1660,7 +1677,7 @@ function renderHome() {
     h += '<div class="home-card" onclick="nav(\'finance_expense\')"><div class="icon">💸</div><div class="label">支出登记</div><div class="sublabel">记录开支</div></div>';
   }
   if(canViewFinance()) h += '<div class="home-card" onclick="nav(\'finance_pnl\')"><div class="icon">📊</div><div class="label">利润表</div><div class="sublabel">财务分析</div></div>';
-  if(isBoss()) h += '<div class="home-card" onclick="doBackup()" style="border:2px solid #2e7d32"><div class="icon">💾</div><div class="label">备份数据</div><div class="sublabel">下载3个文件</div></div>';
+  if(isSuperAdmin()) h += '<div class="home-card" onclick="doBackup()" style="border:2px solid #2e7d32"><div class="icon">💾</div><div class="label">备份数据</div><div class="sublabel">下载3个文件</div></div>';
   h += "</div></div>";
 
   h += '<div class="card"><div class="card-header"><div class="card-title">📋 最近贷款记录</div></div>';
@@ -2181,7 +2198,7 @@ function renderList() {
   // 统计栏
   h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">';
   h+='<div style="background:#e8f5e9;border-radius:10px;padding:10px 12px;cursor:pointer;border:2px solid transparent" onclick="setStatusFilter(\'active\')" id="sc_active"><div style="font-size:18px;font-weight:700;color:#2e7d32">'+active+'</div><div style="font-size:11px;color:#546e7a">还款中</div></div>';
-  h+='<div style="background:#ffebee;border-radius:10px;padding:10px 12px;cursor:pointer;border:2px solid transparent" onclick="setStatusFilter(\'overdue\')" id="sc_overdue"><div style="font-size:18px;font-weight:700;color:#c62828">'+overdue+'</div><div style="font-size:11px;color:#546e7a">已逾期</div></div>';
+  h+='<div style="background:#ffebee;border-radius:10px;padding:10px 12px;cursor:pointer;border:2px solid transparent" onclick="setStatusFilter(\'overdue\')" id="sc_overdue"><div style="font-size:18px;font-weight:700;color:#c62828">'+overdue+'</div><div style="font-size:11px;color:#546e7a">利息逾期</div></div>';
   h+='<div style="background:#fff3e0;border-radius:10px;padding:10px 12px;cursor:pointer;border:2px solid transparent" onclick="setStatusFilter(\'pending\')" id="sc_pending"><div style="font-size:18px;font-weight:700;color:#f57c00">'+pending+'</div><div style="font-size:11px;color:#546e7a">审核中</div></div>';
   h+='<div style="background:#f5f5f5;border-radius:10px;padding:10px 12px;cursor:pointer;border:2px solid transparent" onclick="setStatusFilter(\'closed\')" id="sc_closed"><div style="font-size:18px;font-weight:700;color:#9e9e9e">'+closed+'</div><div style="font-size:11px;color:#546e7a">已结清</div></div>';
   h+='</div>';
@@ -2189,7 +2206,7 @@ function renderList() {
   h+='<div class="search-row">';
   h+='<input type="text" id="searchInput" placeholder="搜索客户/合同号/车牌/手机..." oninput="filterList()" style="flex:2">';
   h+='<select id="monthFilter" onchange="filterList()"><option value="">全部月份</option>'+getMonthOptions()+'</select>';
-  h+='<select id="statusFilter" onchange="filterList();updateStatCards()"><option value="">全部状态</option><option value="active">还款中</option><option value="overdue">已逾期</option><option value="pending">审核中</option><option value="closed">已结清</option></select>';
+  h+='<select id="statusFilter" onchange="filterList();updateStatCards()"><option value="">全部状态</option><option value="active">还款中</option><option value="overdue">利息逾期</option><option value="pending">审核中</option><option value="closed">已结清</option></select>';
   h+='<select id="repayFilter" onchange="filterList()"><option value="">全部方式</option><option value="先息后本">先息后本</option><option value="等额本息">等额本息</option><option value="永续贷">永续贷</option><option value="自定义还款">自定义还款</option><option value="实收记账">实收记账</option></select>';
   h+='<select id="agentFilter" onchange="filterList()"><option value="">全部经办人</option>'+getAgentOptions()+'</select>';
   h+='<button class="btn btn-success" onclick="nav(\'add\')">➕ 新增</button>';
@@ -2775,7 +2792,7 @@ function onRepayLoanSelect() {
     var already = recorded.indexOf(i) >= 0;
     var due = calc.schedule[i-1] ? (calc.schedule[i-1].dueDate||'') : '';
     var overdue = due && due < today && !already;
-    var label = '第'+i+'期'+(due?'（应还'+due+'）':'')+(already?' ✅已登记':(overdue?' ⚠️已逾期':''));
+    var label = '第'+i+'期'+(due?'（应还'+due+'）':'')+(already?' ✅已登记':(overdue?' ⚠️利息逾期':''));
     opts += '<option value="'+i+'"'+(i===nextP?' selected':'')+'>'+label+'</option>';
   }
   sel.innerHTML = opts;
@@ -3065,7 +3082,7 @@ function renderFinancePnL() {
   h+='<div class="stat-card blue"><div class="stat-icon">🏦</div><div class="stat-label">实收本金</div><div class="stat-value" style="font-size:18px">$'+monthPrinRecv.toFixed(0)+'</div><div class="stat-sub">本金回收登记合计</div>';
   var collectRate = monthIntDue>0?Math.round(monthIntRecv/monthIntDue*100):0;
   h+='</div><div class="stat-card '+(collectRate>=80?'green':collectRate>=50?'amber':'red')+'"><div class="stat-icon">📊</div><div class="stat-label">利息回收率</div><div class="stat-value" style="font-size:18px">'+collectRate+'%</div><div class="stat-sub">实收/应收</div></div>';
-  h+='<div class="stat-card '+(overdueRate>10?'red':'purple')+'"><div class="stat-icon">⚠️</div><div class="stat-label">逾期率</div><div class="stat-value" style="font-size:18px">'+overdueRate+'%</div><div class="stat-sub">'+overdueLoans.length+'笔逾期</div></div>';
+  h+='<div class="stat-card '+(overdueRate>10?'red':'purple')+'"><div class="stat-icon">⚠️</div><div class="stat-label">利息逾期率</div><div class="stat-value" style="font-size:18px">'+overdueRate+'%</div><div class="stat-sub">'+overdueLoans.length+'笔利息逾期</div></div>';
 
   h+='</div>';
 
@@ -3118,7 +3135,7 @@ function renderFinancePnL() {
   h+='<div class="table-wrap"><table><thead><tr><th>状态</th><th>笔数</th><th>本金合计</th><th>占比</th></tr></thead><tbody>';
   var groups=[
     {label:'还款中',list:activeLoans,color:'#2e7d32'},
-    {label:'逾期',list:overdueLoans,color:'#c62828'},
+    {label:'利息逾期',list:overdueLoans,color:'#c62828'},
     {label:'审核中',list:pendingLoans,color:'#f57c00'},
     {label:'已结清',list:closedLoans,color:'#9e9e9e'}
   ];
@@ -3180,8 +3197,8 @@ function renderCashFlow() {
 
 function renderOverdue() {
   var overdue = loanRecords().filter(isLoanOverdue);
-  var h = '<div class="page-header"><div class="page-title">⚠️ 逾期催收</div><div class="page-sub">共 '+overdue.length+' 笔逾期贷款</div></div>';
-  if(overdue.length===0) { h += '<div class="card" style="text-align:center;padding:50px"><div style="font-size:48px;margin-bottom:12px">🎉</div><div style="font-size:16px;font-weight:600;color:var(--green)">暂无逾期贷款！</div></div>'; document.getElementById("mainContent").innerHTML = h; return; }
+  var h = '<div class="page-header"><div class="page-title">⚠️ 利息逾期催收</div><div class="page-sub">共 '+overdue.length+' 笔利息逾期贷款 · 车辆抵押在我们手里，随时可处置，这里催的是利息，不是本金风险</div></div>';
+  if(overdue.length===0) { h += '<div class="card" style="text-align:center;padding:50px"><div style="font-size:48px;margin-bottom:12px">🎉</div><div style="font-size:16px;font-weight:600;color:var(--green)">暂无利息逾期贷款！</div></div>'; document.getElementById("mainContent").innerHTML = h; return; }
   h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>编号</th><th>客户</th><th>手机号</th><th>车牌</th><th>金额</th><th>月供</th><th>放款日</th><th>操作</th></tr></thead><tbody>';
   for(var i=0;i<overdue.length;i++) { var l=overdue[i]; h += '<tr style="background:#fff5f5"><td style="font-weight:600;color:var(--red)">'+l.id+'</td><td>'+l.name+'</td><td>'+l.phone+'</td><td>'+l.plate+'</td><td style="font-weight:600">'+formatMoney(l.amount)+'</td><td>'+formatMoney(calcMonthly(l.amount,l.rate,l.term))+'</td><td>'+formatDate(l.date)+'</td><td>'+(canWriteLoans()?'<button class="btn btn-sm btn-primary" onclick="editLoan(\''+l.id+'\')">处理</button>':'<span style="color:var(--muted);font-size:12px">只读</span>')+'</td></tr>'; }
   h += "</tbody></table></div></div>";
