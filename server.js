@@ -151,7 +151,7 @@ async function initUsers() {
   rebuildUserIndex();
 }
 function sanitizeUser(rec) {
-  return { id: rec.id, username: rec.usernames[0], usernames: rec.usernames, displayName: rec.displayName, role: rec.role, status: rec.status, isSuperAdmin: !!rec.isSuperAdmin, createdAt: rec.createdAt };
+  return { id: rec.id, username: rec.usernames[0], usernames: rec.usernames, displayName: rec.displayName, role: rec.role, status: rec.status, isSuperAdmin: !!rec.isSuperAdmin, canManualFinance: !!rec.canManualFinance, createdAt: rec.createdAt };
 }
 function activeBossCount() {
   return USER_RECORDS.filter(r => r.role === 'boss' && r.status === 'active').length;
@@ -191,8 +191,8 @@ app.post('/api/login', (req, res) => {
     return res.status(401).json({ error: 'ACCOUNT_DISABLED', message: '此账号已被禁用，请联系管理员' });
   }
   const token = crypto.randomBytes(24).toString('hex');
-  sessions.set(token, { username: String(username).trim(), role: rec.role, displayName: rec.displayName, isSuperAdmin: !!rec.isSuperAdmin, ts: Date.now() });
-  res.json({ ok: true, token, role: rec.role, displayName: rec.displayName, username: String(username).trim(), isSuperAdmin: !!rec.isSuperAdmin });
+  sessions.set(token, { username: String(username).trim(), role: rec.role, displayName: rec.displayName, isSuperAdmin: !!rec.isSuperAdmin, canManualFinance: !!rec.canManualFinance, ts: Date.now() });
+  res.json({ ok: true, token, role: rec.role, displayName: rec.displayName, username: String(username).trim(), isSuperAdmin: !!rec.isSuperAdmin, canManualFinance: !!rec.canManualFinance });
 });
 
 app.post('/api/logout', auth, (req, res) => {
@@ -203,7 +203,7 @@ app.post('/api/logout', auth, (req, res) => {
 });
 
 app.get('/api/me', auth, (req, res) => {
-  res.json({ ok: true, username: req.user.username, role: req.user.role, displayName: req.user.displayName, isSuperAdmin: !!req.user.isSuperAdmin });
+  res.json({ ok: true, username: req.user.username, role: req.user.role, displayName: req.user.displayName, isSuperAdmin: !!req.user.isSuperAdmin, canManualFinance: !!req.user.canManualFinance });
 });
 
 // ══ 账号管理（系统设置专属：只有 isSuperAdmin:true 的老板账号能自己新增/改角色/
@@ -231,11 +231,14 @@ app.post('/api/users', auth, async (req, res) => {
     if (dup) return res.status(400).json({ error: 'DUP_USERNAME', message: '这个用户名已经被使用了' });
     // 新建的老板角色账号默认不给系统设置权限（isSuperAdmin:false），要的话前端勾选
     const isSuperAdmin = role === 'boss' && !!(req.body || {}).isSuperAdmin;
-    const rec = { id: genUserId(), usernames: [username], displayName, role, status: 'active', passwordHash: hashPassword(password), isSuperAdmin: isSuperAdmin, createdAt: new Date().toISOString() };
+    // 新建的业务员账号默认不给"其他收入登记/支出登记"权限（canManualFinance:false），
+    // 只有个别需要的账号（比如 siyan）才在前端单独勾选给
+    const canManualFinance = role === 'sales' && !!(req.body || {}).canManualFinance;
+    const rec = { id: genUserId(), usernames: [username], displayName, role, status: 'active', passwordHash: hashPassword(password), isSuperAdmin: isSuperAdmin, canManualFinance: canManualFinance, createdAt: new Date().toISOString() };
     USER_RECORDS.push(rec);
     await persistUsers();
     rebuildUserIndex();
-    await logAccountChange(req.user, 'add', displayName + '（' + username + '）', '新增账号，角色：' + role + (isSuperAdmin?'（系统管理员）':''));
+    await logAccountChange(req.user, 'add', displayName + '（' + username + '）', '新增账号，角色：' + role + (isSuperAdmin?'（系统管理员）':'') + (canManualFinance?'（可登记其他收支）':''));
     res.json({ ok: true, user: sanitizeUser(rec) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -272,6 +275,7 @@ app.post('/api/users/:id/update', auth, async (req, res) => {
       if (role !== rec.role) changeNotes.push('角色改为' + role);
       rec.role = role;
       if (role !== 'boss' && rec.isSuperAdmin) rec.isSuperAdmin = false; // 不是老板角色了，系统管理员权限没意义，一起清掉
+      if (role !== 'sales' && rec.canManualFinance) rec.canManualFinance = false; // 不是业务员角色了，其他收支登记权限没意义，一起清掉
     }
     if (body.isSuperAdmin !== undefined) {
       const wantSuperAdmin = !!body.isSuperAdmin;
@@ -285,6 +289,15 @@ app.post('/api/users/:id/update', auth, async (req, res) => {
       }
       if (wantSuperAdmin !== rec.isSuperAdmin) changeNotes.push(wantSuperAdmin ? '设为系统管理员' : '取消系统管理员');
       rec.isSuperAdmin = wantSuperAdmin;
+    }
+    if (body.canManualFinance !== undefined) {
+      const wantManualFinance = !!body.canManualFinance;
+      // 同理，rec.role 这时候已经是上面 role 分支处理完之后的最新值了
+      if (wantManualFinance && rec.role !== 'sales') {
+        return res.status(400).json({ error: 'BAD_INPUT', message: '只有业务员角色的账号能单独授权"其他收入登记/支出登记"' });
+      }
+      if (wantManualFinance !== rec.canManualFinance) changeNotes.push(wantManualFinance ? '授权其他收支登记' : '取消其他收支登记授权');
+      rec.canManualFinance = wantManualFinance;
     }
     if (body.status !== undefined) {
       const status = String(body.status).trim();
@@ -351,6 +364,12 @@ const ROLE_PERMS = {
 // sales 通过 'business_repay' 能新增的财务记录分类白名单；除"收购车辆销售利润"外，
 // 其余几类都必须带 loanId（见 checkKeyPermission）。
 const SALES_ALLOWED_FINANCE_CATEGORIES = ['收购车辆销售利润', '利息收入', '本金回收', '滞纳金'];
+// 2026-10：个别业务员账号（比如 siyan）可以被单独授权"其他收入登记/支出登记"
+// 这两个页面——跟上面"回款登记"那条路完全独立：不用关联合同，分类是这张表单
+// 自己固定的那几种（跟老板用的是同一张表单、同一套分类）。只有 user 记录上
+// canManualFinance:true 的 sales 账号才能用，其他业务员不受影响。
+const MANUAL_FINANCE_INCOME_CATEGORIES = ['利息收入', '本金回收', '手续费', '滞纳金', '其他收入'];
+const MANUAL_FINANCE_EXPENSE_CATEGORIES = ['办公费用', '工资支出', '推广费用', '车辆评估费', '其他支出'];
 
 function diffById(oldArr, newArr) {
   oldArr = Array.isArray(oldArr) ? oldArr : [];
@@ -383,7 +402,8 @@ function mergeArrayUpdate(oldArr, added, edited, removed, allowDel) {
   return added.concat(kept); // 新增的放最前面，跟客户端 unshift() 的习惯保持一致
 }
 
-function checkKeyPermission(role, key, newValue, currentData) {
+function checkKeyPermission(user, key, newValue, currentData) {
+  const role = user.role;
   const perm = (ROLE_PERMS[role] || {})[key];
   if (!perm) return { ok: false, reason: `角色无权修改 ${key}` };
   const oldArr = (currentData && currentData[key]) || [];
@@ -411,12 +431,22 @@ function checkKeyPermission(role, key, newValue, currentData) {
     if (perm.add === true) { /* 允许 */ }
     else if (perm.add === 'business_repay') {
       const loanIds = new Set((currentData.car_loans || []).map(l => l.id));
+      const canManual = role === 'sales' && user.canManualFinance === true;
       const bad = added.find(r => {
-        if (!SALES_ALLOWED_FINANCE_CATEGORIES.includes(r.category)) return true;
-        if (r.category === '收购车辆销售利润') return false; // 卖收购车那一笔，走原逻辑
-        return !r.loanId || !loanIds.has(r.loanId); // 回款记录必须关联一个真实存在的合同
+        // 原有：回款登记相关——收购车辆销售利润，或者利息收入/本金回收/滞纳金但
+        // 必须关联一个真实存在的合同
+        const okRepay = SALES_ALLOWED_FINANCE_CATEGORIES.includes(r.category) &&
+          (r.category === '收购车辆销售利润' || (!!r.loanId && loanIds.has(r.loanId)));
+        if (okRepay) return false;
+        // 额外：被单独授权"其他收入登记/支出登记"的账号，可以不关联合同、按这两个
+        // 页面自己的固定分类手动登记（跟老板用的是同一张表单）
+        if (canManual) {
+          if (r.type === 'income' && MANUAL_FINANCE_INCOME_CATEGORIES.includes(r.category)) return false;
+          if (r.type === 'expense' && MANUAL_FINANCE_EXPENSE_CATEGORIES.includes(r.category)) return false;
+        }
+        return true;
       });
-      if (bad) return { ok: false, reason: '业务员只能新增"收购车辆销售利润"或关联真实合同的回款记录（利息收入/本金回收/滞纳金）' };
+      if (bad) return { ok: false, reason: canManual ? '这条记录的分类不在允许登记的范围内' : '业务员只能新增"收购车辆销售利润"或关联真实合同的回款记录（利息收入/本金回收/滞纳金）' };
     } else {
       return { ok: false, reason: '无权新增记录' };
     }
@@ -557,7 +587,7 @@ app.post('/api/data', auth, async (req, res) => {
         finalValues[key] = body[key];
         continue;
       }
-      const check = checkKeyPermission(req.user.role, key, body[key], current);
+      const check = checkKeyPermission(req.user, key, body[key], current);
       if (!check.ok) return res.status(403).json({ error: 'PERMISSION_DENIED', message: check.reason });
       finalValues[key] = check.mergedValue;
       logBatches.push({ key, added: check.added, edited: check.edited, removed: check.removed });
