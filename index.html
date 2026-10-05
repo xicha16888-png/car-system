@@ -249,14 +249,14 @@ html,body{overflow:auto;height:auto}
 
 // ══ 版本号：老板每次改完系统、贴到GitHub部署新版之后，把这个数字改一下 ══
 // （改哪一位都行，只要跟上一个版本不一样，业务员浏览器就能感知到"有新版本"）
-var APP_VERSION = "20261002a";
+var APP_VERSION = "20261005a";
 var _pendingUpdate = false;   // 已经检测到线上有新版本，还没刷新
 var _updateSnoozed = false;   // 业务员点了"稍后"，先别再弹倒计时打扰他
 // 只在这些"纯浏览/看报表"页面允许直接自动刷新——凡是可能正在填表/登记的页面
 // （新增贷款/回款登记/收支登记/批量导入/收购车辆/结算/账号管理等）一律不打扰，
 // 等业务员自己点导航离开那个页面时，再顺手刷新，绝不会打断他正在填的东西。
 var SAFE_NAV_PAGES = ["home","list","finance_pnl","finance_cashflow","overdue",
-  "haircut_detail","interest_detail","profit_detail","middleman_detail","acquired_list","data_check","oplog"];
+  "haircut_detail","interest_detail","profit_detail","middleman_detail","acquired_list","data_check","oplog","snapshots"];
 
 // ══ 后端API配置（Key藏在服务器，前端看不到）══
 var _loans = [];
@@ -374,6 +374,42 @@ async function tryResumeSession() {
 var SETTLEMENT_CUTOFF = "2026-09-01";
 
 
+// ══ 自动快照页（系统管理员）══ 服务器每次保存前自动存"保存前的完整数据"，万一哪天记录
+// 不见了，来这里下载最近的快照，再用"恢复数据"导回去。格式跟"备份数据"完全一样。
+async function renderSnapshots() {
+  if(!isSuperAdmin()) { alert("⛔ 只有系统管理员能查看自动快照"); return; }
+  var box = document.getElementById("mainContent");
+  box.innerHTML = '<div class="page-header"><div class="page-title">🛟 自动快照</div><div class="page-sub">加载中...</div></div>';
+  var list = [];
+  try {
+    var res = await fetch("/api/autosnap", {headers: authHeaders()});
+    var d = await res.json();
+    if(!res.ok) throw new Error(d.message||"加载失败");
+    list = d.snapshots || [];
+  } catch(e) { box.innerHTML = '<div class="card" style="padding:20px;color:#c62828">❌ '+e.message+'</div>'; return; }
+  var h = '<div class="page-header"><div class="page-title">🛟 自动快照</div><div class="page-sub">系统每次保存前自动留的"完整数据快照"（最多保留最近10份）。有删除、整体恢复覆盖时一定会留；平时每6小时留一份。</div></div>';
+  h += '<div class="card"><div class="table-wrap"><table><thead><tr><th>时间</th><th>触发者</th><th>原因</th><th>合同数</th><th>财务记录数</th><th>操作</th></tr></thead><tbody>';
+  if(list.length===0) h += '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">还没有快照（下一次有人保存数据后就会自动生成）</td></tr>';
+  list.forEach(function(x){
+    var t = new Date(x.time);
+    var ts = t.getFullYear()+"-"+String(t.getMonth()+1).padStart(2,"0")+"-"+String(t.getDate()).padStart(2,"0")+" "+String(t.getHours()).padStart(2,"0")+":"+String(t.getMinutes()).padStart(2,"0");
+    h += '<tr><td>'+ts+'</td><td>'+(x.by||"")+'</td><td>'+(x.reason||"")+'</td><td>'+x.loanCount+'</td><td>'+x.financeCount+'</td><td><button class="btn btn-sm btn-primary" onclick="downloadSnapshot(\''+x.id+'\')">⬇️ 下载</button></td></tr>';
+  });
+  h += '</tbody></table></div></div>';
+  box.innerHTML = h;
+}
+async function downloadSnapshot(id) {
+  if(!isSuperAdmin()) return;
+  try {
+    var res = await fetch("/api/autosnap/"+encodeURIComponent(id), {headers: authHeaders()});
+    var d = await res.json();
+    if(!res.ok) throw new Error(d.message||"下载失败");
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify({car_loans:d.car_loans, car_finance:d.car_finance},null,2)],{type:"application/json"}));
+    a.download = "CAR_autosnap_"+id+".json"; a.click();
+  } catch(e) { alert("❌ "+e.message); }
+}
+
 function doBackup() {
   if(!isSuperAdmin()) { alert("⛔ 只有系统管理员能备份数据"); return; }
   var today = new Date().toISOString().slice(0,10);
@@ -401,7 +437,7 @@ function doRestore() {
         if(!d.car_loans&&!d.car_finance){alert("❌ 无效备份文件");return;}
         if(!confirm("确定恢复？将覆盖当前数据\n合同："+((d.car_loans||[]).length)+"条，财务："+((d.car_finance||[]).length)+"条"))return;
         _loans=d.car_loans||[];_financeRecords=d.car_finance||[];
-        await saveLoans();alert("✅ 恢复成功！");nav("home");
+        await saveLoans({bulkReplace:true});alert("✅ 恢复成功！");nav("home");
       }catch(err){alert("❌ 解析失败："+err.message);}
     };reader.readAsText(file);
   };inp.click();
@@ -950,16 +986,18 @@ function setSyncStatus(s) {
 }
 
 // ══ 通过后端API读写数据（Supabase Key不暴露）══
-async function saveLoans() {
+async function saveLoans(opts) {
   try {
     setSyncStatus("syncing");
+    var body = {car_loans:_loans, car_finance:_financeRecords};
+    if(opts && opts.bulkReplace) body._bulkReplace = true; // 仅"恢复数据"整体覆盖时使用，服务器只认系统管理员
     var res = await fetch("/api/data", {
       method:"POST",
       headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
-      body:JSON.stringify({car_loans:_loans, car_finance:_financeRecords})
+      body:JSON.stringify(body)
     });
     if(res.status===401) { setSyncStatus("error"); showLoginScreen("登录已过期，请重新登录"); return; }
-    if(res.status===403) { setSyncStatus("error"); var d=await res.json().catch(function(){return{};}); alert("❌ 无权限："+(d.message||"操作被拒绝，请刷新页面重新加载最新数据")); return; }
+    if(res.status===403 || res.status===409) { setSyncStatus("error"); var d=await res.json().catch(function(){return{};}); alert((res.status===409?"🛡️ 已拒绝保存：":"❌ 无权限：")+(d.message||"操作被拒绝，请刷新页面重新加载最新数据")); return; }
     if(res.ok) setSyncStatus("ok"); else setSyncStatus("error");
   } catch(e) { setSyncStatus("error"); }
 }
@@ -972,7 +1010,7 @@ async function saveFinance() {
       body:JSON.stringify({car_finance:_financeRecords})
     });
     if(res.status===401) { setSyncStatus("error"); showLoginScreen("登录已过期，请重新登录"); return; }
-    if(res.status===403) { setSyncStatus("error"); var d=await res.json().catch(function(){return{};}); alert("❌ 无权限："+(d.message||"操作被拒绝，请刷新页面重新加载最新数据")); return; }
+    if(res.status===403 || res.status===409) { setSyncStatus("error"); var d=await res.json().catch(function(){return{};}); alert((res.status===409?"🛡️ 已拒绝保存：":"❌ 无权限：")+(d.message||"操作被拒绝，请刷新页面重新加载最新数据")); return; }
     if(res.ok) setSyncStatus("ok"); else setSyncStatus("error");
   } catch(e) { setSyncStatus("error"); }
 }
@@ -1026,8 +1064,18 @@ async function mutateData(applyLoans, applyFinance, _retried) {
   var freshLoans = fresh.car_loans || [];
   var freshFinance = fresh.car_finance || [];
   var payload = {};
+  // 2026-10 "删除必须明说"：记下修改前有哪些记录ID，修改后少了哪些，就是这次"有意删除"的清单，
+  // 一起交给服务器。服务器发现有记录在提交里消失、却不在这份清单里，会当成意外直接拒绝。
+  var beforeLoanIds = freshLoans.map(function(x){ return x.id; });
+  var beforeFinanceIds = freshFinance.map(function(x){ return x.id; });
   if(applyLoans) { freshLoans = applyLoans(freshLoans) || freshLoans; payload.car_loans = freshLoans; }
   if(applyFinance) { freshFinance = applyFinance(freshFinance) || freshFinance; payload.car_finance = freshFinance; }
+  var afterLoanIds = {}; freshLoans.forEach(function(x){ afterLoanIds[x.id]=1; });
+  var afterFinanceIds = {}; freshFinance.forEach(function(x){ afterFinanceIds[x.id]=1; });
+  payload._intendedRemovals = {
+    car_loans: applyLoans ? beforeLoanIds.filter(function(id){ return !afterLoanIds[id]; }) : [],
+    car_finance: applyFinance ? beforeFinanceIds.filter(function(id){ return !afterFinanceIds[id]; }) : []
+  };
   try {
     var res = await fetch("/api/data", {
       method:"POST",
@@ -1047,6 +1095,12 @@ async function mutateData(applyLoans, applyFinance, _retried) {
       }
       setSyncStatus("error");
       alert("❌ 无权限："+(d.message||"操作被拒绝，请刷新页面重新加载最新数据"));
+      return {ok:false};
+    }
+    if(res.status===409) {
+      var d409=await res.json().catch(function(){return{};});
+      setSyncStatus("error");
+      alert("🛡️ 已拒绝保存："+(d409.message||"检测到记录会意外消失，请刷新页面后重试"));
       return {ok:false};
     }
     if(!res.ok) { setSyncStatus("error"); return {ok:false}; }
@@ -1355,6 +1409,7 @@ function buildSidebar() {
     items.push({id:"data_check", icon:"🔍", label:"数据体检"});
     items.push({id:"user_manage", icon:"👥", label:"账号管理"});
     items.push({id:"oplog", icon:"📝", label:"操作日志"});
+    items.push({id:"snapshots", icon:"🛟", label:"自动快照"});
     items.push({id:"backup", icon:"💾", label:"备份数据"});
     items.push({id:"restore", icon:"📂", label:"恢复数据"});
   }
@@ -1374,7 +1429,7 @@ function buildSidebar() {
 // ══ 页面级权限校验（前端拦截，真正的数据保护在服务器）══
 var PAGE_REQUIRES = {
   add:"writeLoans", acquired_add:"writeLoans", import:"writeLoans", repay_collect:"writeLoans",
-  backup:"superAdmin", restore:"superAdmin", user_manage:"superAdmin", data_check:"superAdmin", oplog:"superAdmin",
+  backup:"superAdmin", restore:"superAdmin", user_manage:"superAdmin", data_check:"superAdmin", oplog:"superAdmin", snapshots:"superAdmin",
   finance_pnl:"viewFinance", settlement:"viewFinance", finance_cashflow:"viewFinance",
   haircut_detail:"viewFinance", interest_detail:"viewFinance", profit_detail:"viewFinance", middleman_detail:"viewFinance",
   finance_income:"financeEntry", finance_expense:"financeEntry"
@@ -1471,6 +1526,7 @@ function nav(page) {
   else if(page==="user_manage") renderUserManage();
   else if(page==="data_check") renderDataCheck();
   else if(page==="oplog") renderOplog();
+  else if(page==="snapshots") renderSnapshots();
 }
 
 // ══ 首页数字点进去看明细 ══
@@ -1636,7 +1692,7 @@ async function recordSettlementExtraction() {
   if(already) { alert("历史利润已经提取过了，不能重复提取。如果9/1前的数据后来有改动，请告诉我如何处理差额。"); return; }
   var pre = computeProfitBreakdown(isBeforeCutoff);
   if(!confirm("确认提取 "+SETTLEMENT_CUTOFF+" 之前历史利润 "+formatMoney(pre.netProfit)+"？\n\n提取后这笔钱会定格存档，以后都和系统日常核算无关；首页/利润表/现金流会永久只看"+SETTLEMENT_CUTOFF+"起的数据，不可逆，请确认无误。")) return;
-  _financeRecords.unshift({
+  var settleRec = {
     id: "SETTLE"+Date.now(),
     type: "settlement",
     amount: pre.netProfit,
@@ -1644,8 +1700,8 @@ async function recordSettlementExtraction() {
     date: new Date().toISOString().slice(0,10),
     loanId: "",
     note: SETTLEMENT_CUTOFF+"前历史利润确认提取：砍头息"+formatMoney(pre.haircut)+" + 利息收入"+formatMoney(pre.interestIncome)+" + 其他收入"+formatMoney(pre.otherIncome)+" − 支出"+formatMoney(pre.expense)+" − 中间人介绍费"+formatMoney(pre.middlemanFee)+" = "+formatMoney(pre.netProfit)+"（这笔钱以后都和系统无关）"
-  });
-  await saveFinance();
+  };
+  await mutateData(null, function(freshFinance){ freshFinance.unshift(settleRec); return freshFinance; });
   alert("✅ 已提取历史利润 "+formatMoney(pre.netProfit)+"，以后系统日常数字只看"+SETTLEMENT_CUTOFF+"起的数据");
   renderSettlement();
 }
@@ -2341,7 +2397,8 @@ function filterList() {
 
   if(!s && closedList.length>0) {
     var closedAmt = closedList.reduce(function(s,l){return s+l.amount;},0);
-    var isOpen = !!_closedSectionOpen;
+    // 搜索时自动展开已结清：搜"Le Yuyet Sang"/合同号时，结清的合同不能还藏在折叠区里让人以为"不见了"
+    var isOpen = !!_closedSectionOpen || !!q;
     h += '<div onclick="toggleClosedSection()" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin:18px 0 0;background:#78909c;border-radius:'+(isOpen?'8px 8px 0 0':'8px')+';color:#fff;cursor:pointer;user-select:none">';
     h += '<span style="font-weight:700;font-size:13px"><span id="closedSectionArrow">'+(isOpen?'▼':'▶')+'</span> 📁 已结清合同（'+closedList.length+'笔）</span>';
     h += '<span style="font-size:12px;opacity:.85">贷款合计 $'+closedAmt.toLocaleString()+'</span></div>';
