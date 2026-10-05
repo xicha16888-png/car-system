@@ -451,7 +451,21 @@ function checkKeyPermission(user, key, newValue, currentData) {
       return { ok: false, reason: '无权新增记录' };
     }
   }
-  return { ok: true, mergedValue: mergeArrayUpdate(oldArr, added, edited, removed, !!perm.del), added, edited, removed };
+  // 2026-10-05 修复操作日志"假删除"：业务员提交的财务数组天然看不到旧记录（见上面
+  // isBlindAddOnly 的说明），diff 会把数据库里所有旧记录都算成 removed。但没有 del 权限
+  // 的角色，mergeArrayUpdate 根本不会真的删任何东西——这里如果还把 removed 原样返回，
+  // 操作日志就会给业务员记上一大堆"删除"，其实数据一条没动（小美登记一笔回款，日志里
+  // 却出现她"删除"了二十几条财务记录）。没有 del 权限时，真实被删的永远是空。
+  const actualRemoved = perm.del ? removed : [];
+  const mergedValue = mergeArrayUpdate(oldArr, added, edited, removed, !!perm.del);
+  // 双保险：没有 del 权限的角色（业务员/财务），保存后数据库里原有的每一条记录都必须还在。
+  // 万一以后谁改坏了上面的合并逻辑，宁可拒绝这次保存，也不让业务员的操作带走任何一条旧记录。
+  if (!perm.del) {
+    const mergedIds = new Set(mergedValue.map(x => x.id));
+    const lost = oldArr.find(x => !mergedIds.has(x.id));
+    if (lost) return { ok: false, reason: '内部校验失败：这次保存会导致已有记录丢失，已拒绝（记录 ' + lost.id + '）' };
+  }
+  return { ok: true, mergedValue, added, edited, removed: actualRemoved };
 }
 
 // ══════════════════════════════════════════════════════════
@@ -477,6 +491,48 @@ async function persistOplog() {
   const { error } = await supabase.from('pawndata').upsert([{ key: 'car_oplog', value: OPLOG }], { onConflict: 'key' });
   if (error) throw new Error('DB_WRITE_ERROR: ' + error.message);
 }
+// ══════════════════════════════════════════════════════════
+// ══ 自动快照（数据安全网）══ 2026-10-05 新增：老板要求"数据非常重要，绝不能再出现
+// 记录不见了、还找不回来"。每次保存之前，服务器自动把"保存前那一刻的完整数据"存一份
+// 快照（单独存在数据库 car_autosnap 这一行，不影响业务数据）：
+//   · 距离上一份快照超过 6 小时，就在下一次保存前存一份；
+//   · 只要这次保存会真的删除记录、或者是"整体恢复覆盖"，不管间隔多久都先存一份。
+// 只保留最近 10 份。只有系统管理员能在"自动快照"页面下载，下载下来的文件格式跟
+// "备份数据"完全一样，可以直接用"恢复数据"导回去。
+// ══════════════════════════════════════════════════════════
+const AUTOSNAP_KEY = 'car_autosnap';
+const AUTOSNAP_MAX = 10;
+const AUTOSNAP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+let AUTOSNAPS = null; // 内存缓存：[{id, ts, time, by, reason, loanCount, financeCount, car_loans, car_finance}]，最新的在最前
+async function loadAutosnaps() {
+  if (AUTOSNAPS) return AUTOSNAPS;
+  const { data, error } = await supabase.from('pawndata').select('value').eq('key', AUTOSNAP_KEY).maybeSingle();
+  if (error) throw new Error('DB_READ_ERROR: ' + error.message);
+  AUTOSNAPS = (data && Array.isArray(data.value)) ? data.value : [];
+  return AUTOSNAPS;
+}
+// 失败只打日志，绝不影响这次保存本身
+async function maybeAutoSnapshot(user, current, reason, force) {
+  try {
+    if (!current) return;
+    const list = await loadAutosnaps();
+    const last = list[0];
+    if (!force && last && (Date.now() - last.ts) < AUTOSNAP_INTERVAL_MS) return;
+    const loans = Array.isArray(current.car_loans) ? current.car_loans : [];
+    const finance = Array.isArray(current.car_finance) ? current.car_finance : [];
+    list.unshift({
+      id: 'S' + Date.now().toString(36), ts: Date.now(), time: new Date().toISOString(),
+      by: (user && (user.displayName || user.username)) || '', reason: reason,
+      loanCount: loans.length, financeCount: finance.length, car_loans: loans, car_finance: finance
+    });
+    if (list.length > AUTOSNAP_MAX) list.length = AUTOSNAP_MAX;
+    const { error } = await supabase.from('pawndata').upsert([{ key: AUTOSNAP_KEY, value: list }], { onConflict: 'key' });
+    if (error) console.error('自动快照写入失败（不影响本次保存）：', error.message);
+  } catch (e) {
+    console.error('自动快照失败（不影响本次保存）：', e.message);
+  }
+}
+
 // 贷款/收购车辆记录 -> 一句话摘要，方便日志里一眼看懂动的是谁
 function summarizeLoanRecord(r) {
   if (!r) return '';
@@ -579,6 +635,15 @@ app.post('/api/data', auth, async (req, res) => {
     if (keys.includes('car_loans') || keys.includes('car_finance')) {
       current = await loadData();
     }
+    // 2026-10-05 新增"删除必须明说"：客户端提交时要在 _intendedRemovals 里列出"这次我是
+    // 有意要删掉的记录ID"，服务器发现数据库里有记录在这次提交里不见了、但又不在这份清单
+    // 里，就认定是"过期的完整数组把别人新增的记录冲掉了"这类意外，直接拒绝保存，
+    // 而不是照单全收。整体恢复备份（_bulkReplace）是例外，且只允许系统管理员。
+    const intendedRemovals = (body && typeof body._intendedRemovals === 'object' && body._intendedRemovals) || {};
+    const bulkReplace = !!(body && body._bulkReplace === true);
+    if (bulkReplace && !(req.user.role === 'boss' && req.user.isSuperAdmin)) {
+      return res.status(403).json({ error: 'PERMISSION_DENIED', message: '只有系统管理员能整体恢复数据' });
+    }
     const finalValues = {};
     const logBatches = []; // 攒够这次请求里所有key的日志，写完数据后一次性落库，避免半途报错留一半日志
     for (const key of keys) {
@@ -589,8 +654,22 @@ app.post('/api/data', auth, async (req, res) => {
       }
       const check = checkKeyPermission(req.user, key, body[key], current);
       if (!check.ok) return res.status(403).json({ error: 'PERMISSION_DENIED', message: check.reason });
+      if (check.removed.length > 0 && !bulkReplace) {
+        const okIds = new Set(Array.isArray(intendedRemovals[key]) ? intendedRemovals[key] : []);
+        const unexpected = check.removed.filter(r => !okIds.has(r.id));
+        if (unexpected.length > 0) {
+          console.error('拒绝意外删除：用户 ' + req.user.username + ' 的这次保存会让 ' + key + ' 里 ' + unexpected.length + ' 条记录消失，例如 ' + unexpected[0].id);
+          return res.status(409).json({ error: 'UNEXPECTED_REMOVAL', message: '检测到这次保存会让 ' + unexpected.length + ' 条记录意外消失（例如 ' + unexpected[0].id + '），为保护数据已拒绝。请刷新页面后重试；如果确实想删除，请用页面上的删除按钮。' });
+        }
+      }
       finalValues[key] = check.mergedValue;
       logBatches.push({ key, added: check.added, edited: check.edited, removed: check.removed });
+    }
+
+    // 保存之前先存一份"保存前的完整数据"快照（有删除/整体覆盖时强制存，否则每6小时存一份）
+    if (current) {
+      const hasRemoval = logBatches.some(b => b.removed.length > 0);
+      await maybeAutoSnapshot(req.user, current, bulkReplace ? '整体恢复覆盖前' : (hasRemoval ? '删除记录前' : '定时'), bulkReplace || hasRemoval);
     }
 
     const rows = keys.map(key => ({ key, value: finalValues[key] }));
@@ -610,6 +689,24 @@ app.post('/api/data', auth, async (req, res) => {
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// 自动快照（只有系统管理员能看/下载）
+app.get('/api/autosnap', auth, async (req, res) => {
+  if (req.user.role !== 'boss' || !req.user.isSuperAdmin) return res.status(403).json({ error: 'PERMISSION_DENIED', message: '只有系统管理员能查看自动快照' });
+  try {
+    const list = await loadAutosnaps();
+    res.json({ ok: true, snapshots: list.map(x => ({ id: x.id, time: x.time, by: x.by, reason: x.reason, loanCount: x.loanCount, financeCount: x.financeCount })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/autosnap/:id', auth, async (req, res) => {
+  if (req.user.role !== 'boss' || !req.user.isSuperAdmin) return res.status(403).json({ error: 'PERMISSION_DENIED', message: '只有系统管理员能下载自动快照' });
+  try {
+    const list = await loadAutosnaps();
+    const snap = list.find(x => x.id === req.params.id);
+    if (!snap) return res.status(404).json({ error: 'NOT_FOUND', message: '快照不存在' });
+    res.json({ car_loans: snap.car_loans, car_finance: snap.car_finance });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // 操作日志（只有系统管理员能看，追踪谁新增/编辑/删除了哪条贷款或财务记录）
