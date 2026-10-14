@@ -249,7 +249,7 @@ html,body{overflow:auto;height:auto}
 
 // ══ 版本号：老板每次改完系统、贴到GitHub部署新版之后，把这个数字改一下 ══
 // （改哪一位都行，只要跟上一个版本不一样，业务员浏览器就能感知到"有新版本"）
-var APP_VERSION = "20261014c";
+var APP_VERSION = "20261014d";
 var _pendingUpdate = false;   // 已经检测到线上有新版本，还没刷新
 var _updateSnoozed = false;   // 业务员点了"稍后"，先别再弹倒计时打扰他
 // 只在这些"纯浏览/看报表"页面允许直接自动刷新——凡是可能正在填表/登记的页面
@@ -496,6 +496,16 @@ async function applyRecover() {
 // 按编号找订单/回款会串（改一笔、结清一笔、登记回款都可能落到另一笔身上）。这里自动找出所有
 // 重复编号：选一笔保留原编号，其余的换成新编号；挂在这个编号下的回款/财务记录，逐条选归属哪一笔
 // （系统按放款日期、备注里的客户名先帮你预选好）。两笔订单的数据一条都不会丢。
+// 编号被多笔订单占用时，按编号找订单会串（登记回款、结清、编辑、删除都会落到"第一笔"身上）。
+// 所以只要发现编号重复，涉及按编号操作的入口一律先拦住，让系统管理员去"修复重复编号"。
+function loanIdDupCount(id) { var n = 0; _loans.forEach(function(l){ if(l.id === id) n++; }); return n; }
+function blockIfDupId(id, what) {
+  if(id && loanIdDupCount(id) > 1) {
+    alert("⛔ 编号 "+id+" 现在被多笔订单同时占用，此时"+what+"会串到别的订单上，已拦截。\n请先让系统管理员到「系统设置 → 修复重复编号」处理好再操作。");
+    return true;
+  }
+  return false;
+}
 var _dupGroups = null;
 function dupLoanFp(l, occ) { return [l.name||"", l.plate||"", l.date||"", l.amount==null?"":l.amount, l.phone||""].join("|") + "#" + occ; }
 function findDuplicateGroups(loans, fin) {
@@ -553,6 +563,10 @@ function renderDupFixResult() {
     g.items.forEach(function(it, i){
       h += '<label style="display:block;padding:6px 0;font-size:13px"><input type="radio" name="dupKeep'+gi+'" value="'+i+'"'+(i===g.keep?' checked':'')+'> 保留 '+g.id+'：<b>'+dupLoanLabel(it.loan)+'</b></label>';
     });
+    h += '<div style="font-size:13px;color:#546e7a;margin:10px 0 4px">修复后每笔订单的状态（"自动"=按回款判断：本金收完→已结清；还没收完但被误标成已结清→改回还款中）：</div>';
+    g.items.forEach(function(it, i){
+      h += '<div style="font-size:13px;padding:3px 0">'+(it.loan.name||"")+'（'+(it.loan.plate||"")+'）现在是 <b>'+(it.loan.status==="closed"?"已结清":(it.loan.status==="pending"?"审核中":"还款中"))+'</b> → <select class="dup_status" data-g="'+gi+'" data-i="'+i+'" style="padding:4px;font-size:12px"><option value="auto" selected>自动判断</option><option value="active">还款中</option><option value="closed">已结清</option><option value="keep">不改</option></select></div>';
+    });
     h += '<div style="font-size:13px;color:#546e7a;margin:10px 0 4px">挂在这个编号下的财务/回款记录（'+g.recs.length+' 条），每条选它属于哪一笔：</div>';
     if(g.recs.length === 0) h += '<div style="color:var(--muted);font-size:13px">没有（这个编号下还没有回款记录）</div>';
     g.recs.forEach(function(x, ri){
@@ -576,7 +590,10 @@ async function applyDupFix() {
     for(var i=0;i<radios.length;i++) if(radios[i].checked) keep = parseInt(radios[i].value,10);
     var assign = g.recs.map(function(x){ return x.target; });
     document.querySelectorAll('.dup_rec[data-g="'+gi+'"]').forEach(function(sel){ assign[parseInt(sel.getAttribute("data-r"),10)] = parseInt(sel.value,10); });
-    return { g: g, keep: keep, assign: assign };
+    var statusSel = g.items.map(function(it, i){
+      var el = document.querySelector('.dup_status[data-g="'+gi+'"][data-i="'+i+'"]'); return el ? el.value : "auto";
+    });
+    return { g: g, keep: keep, assign: assign, statusSel: statusSel };
   });
   var summary = plan.map(function(p){
     var moved = p.g.items.filter(function(it,i){ return i!==p.keep; }).map(function(it){ return it.loan.name+"（"+(it.loan.plate||"")+"）"; });
@@ -620,7 +637,37 @@ async function applyDupFix() {
     });
   } finally { _pendingSnapReason = ""; }
   if(!res || !res.ok) { alert("⚠️ 修复没有保存成功（数据没有被改动），请刷新页面后重试"); return; }
-  alert("✅ 修复完成\n"+(mapping.length ? mapping.map(function(m){ return m.name+"：编号 "+m.oldId+" → "+m.newId; }).join("\n") : "（这期间已经有人修好了，无需再改）"));
+  // 编号和回款都归位之后，再按"每笔自己的回款"重新核对状态（此时 _financeRecords 已是保存后的最新数据）
+  var statusNotes = [];
+  var statusPlan = []; // {id, status, name}
+  plan.forEach(function(p){
+    p.g.items.forEach(function(it, i){
+      var sel = p.statusSel[i]; if(sel === "keep") return;
+      var m = mapping.filter(function(mm){ return mm.oldId===p.g.id && mm.fp===it.fp; })[0];
+      var curId = m ? m.newId : p.g.id;
+      var cur = _loans.find(function(l){ return l.id===curId; }); if(!cur) return;
+      var want = sel;
+      if(sel === "auto") {
+        var st = loanActualStats(cur);
+        if(st.principalSum > 0 && st.remainPrincipal <= 0) want = "closed";
+        else if(cur.status === "closed" && st.remainPrincipal > 0) want = "active";
+        else return;
+      }
+      if(cur.status === want) return;
+      statusPlan.push({ id: curId, status: want, name: cur.name, from: cur.status });
+    });
+  });
+  if(statusPlan.length > 0) {
+    _pendingSnapReason = "修复重复编号·改状态前";
+    try {
+      var r2 = await mutateData(function(freshLoans){
+        statusPlan.forEach(function(sp){ var l = freshLoans.find(function(x){ return x.id===sp.id; }); if(l) l.status = sp.status; });
+        return freshLoans;
+      }, null);
+      if(r2 && r2.ok) statusPlan.forEach(function(sp){ statusNotes.push(sp.name+"：状态 "+(sp.from==="closed"?"已结清":"还款中")+" → "+(sp.status==="closed"?"已结清":"还款中")); });
+    } finally { _pendingSnapReason = ""; }
+  }
+  alert("✅ 修复完成\n"+(mapping.length ? mapping.map(function(m){ return m.name+"：编号 "+m.oldId+" → "+m.newId; }).join("\n") : "（这期间已经有人修好了，无需再改）")+(statusNotes.length ? "\n"+statusNotes.join("\n") : ""));
   renderDupFix();
 }
 
@@ -1354,7 +1401,7 @@ async function mutateData(applyLoans, applyFinance, _retried) {
     if(res.status===409) {
       var d409=await res.json().catch(function(){return{};});
       // 编号撞车（两个人几乎同时新增，拿到了同一个编号）：重新拉最新数据、重新生成编号再试一次，用户无感
-      if(!_retried && d409.error==="ID_COLLISION") { return await mutateData(applyLoans, applyFinance, true); }
+      if(!_retried && (d409.error==="ID_COLLISION" || d409.error==="DUPLICATE_ID")) { return await mutateData(applyLoans, applyFinance, true); }
       setSyncStatus("error");
       alert("🛡️ 已拒绝保存："+(d409.message||"检测到记录会意外消失，请刷新页面后重试"));
       return {ok:false};
@@ -2544,6 +2591,7 @@ function renderList() {
   var closed  = _lr.filter(function(l){return l.status==='closed';}).length;
   var pending = _lr.filter(function(l){return l.status==='pending';}).length;
   var h='';
+  if(isSuperAdmin() && findDuplicateGroups(_loans, []).length > 0) h+='<div class="card" style="padding:12px 16px;background:#ffebee;border:1px solid #ef9a9a;color:#c62828;font-size:13px;margin-bottom:12px;cursor:pointer" onclick="nav(\'dupfix\')">🚨 发现订单编号重复（回款、结清状态会串到别的订单上）——点这里去「修复重复编号」</div>';
   h+='<div class="page-header"><div class="page-title">🚗 贷款查询</div><div class="page-sub">共 '+_lr.length+' 笔合同（其中已结清 '+closed+' 笔，默认收在下面折叠区，不占日常查询）</div></div>';
   // 统计栏
   h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">';
@@ -2755,11 +2803,13 @@ function renderLoanGroups(loans, mobile, keyPrefix) {
 
 function editLoan(id) {
   if(!canWriteLoans()) { alert("⛔ 你的账号没有编辑权限"); return; }
+  if(blockIfDupId(id, "编辑")) return;
   for(var i=0;i<_loans.length;i++) { if(_loans[i].id===id) { _editId=id; renderAddForm(_loans[i]); return; } }
 }
 
 async function deleteLoan(id) {
   if(!canDelete()) { alert("⛔ 只有老板账号能删除"); return; }
+  if(blockIfDupId(id, "删除")) return;
   if(!requireDeletePassword("删除编号 "+id+" 的记录")) return;
   await mutateData(function(freshLoans) {
     return freshLoans.filter(function(l){ return l.id!==id; });
@@ -2879,6 +2929,7 @@ async function saveAcquired() {
 
 function editAcquired(id) {
   if(!canWriteLoans()) { alert("⛔ 你的账号没有编辑权限"); return; }
+  if(blockIfDupId(id, "编辑")) return;
   for(var i=0;i<_loans.length;i++) { if(_loans[i].id===id) { _editAcquiredId=id; renderAcquiredForm(_loans[i]); return; } }
 }
 
@@ -2913,6 +2964,7 @@ function renderSellForm(id) {
 async function confirmSell(id) {
   var a = _loans.find(function(l){ return l.id===id; });
   if(!a) return;
+  if(blockIfDupId(id, "登记出售")) return;
   var saleAmount = parseFloat(document.getElementById("s_amount")?.value);
   if(!saleAmount || saleAmount<=0) { alert("请输入有效的成交价"); return; }
   var extraCost = parseFloat(document.getElementById("s_extra")?.value)||0;
@@ -3203,6 +3255,7 @@ async function saveRepayCollect() {
   var loanId = document.getElementById('rc_loanId')?.value||'';
   var loan = _loans.find(function(l){ return l.id===loanId; });
   if(!loan) { alert("请先选择合同"); return; }
+  if(blockIfDupId(loanId, "登记回款")) return;
   var period = parseInt(document.getElementById('rc_period')?.value)||1;
   var date = document.getElementById('rc_date')?.value||new Date().toISOString().slice(0,10);
   var interest = parseFloat(document.getElementById('rc_interest')?.value)||0;
@@ -3325,6 +3378,7 @@ async function saveFinanceRecord(type) {
   if(!canAddFinance()) { alert("⛔ 你的账号没有新增收支记录的权限"); return; }
   var amount = parseFloat(document.getElementById("fi_amount")?.value);
   if(!amount || amount<=0) { alert("请输入有效的金额"); return; }
+  if(blockIfDupId((document.getElementById("fi_loanId")?.value||"").trim(), "登记收支")) return;
   var rec = {
     id: "F"+Date.now(),
     type: type,
