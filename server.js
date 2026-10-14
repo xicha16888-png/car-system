@@ -886,6 +886,38 @@ const DATA_MIGRATIONS = [{
     }
     return changed;
   }
+}, {
+  // 2026-10-14：2BX-1980(hour Sivmey) 这笔合同在线上系统里消失了（贷款列表的"还款中"和"已结清"里都找不到），
+  // 但它的回款记录还在。下面是它 9月26日备份里的原始完整记录（客户/电话/车牌/放款/还款计划都在）。
+  // 只有"现在系统里确实没有这笔(按车牌 2BX-1980 和客户名 hour Sivmey 都找不到)"时才补回；
+  // 如果它的编号 CL202606002 现在被别的订单占着，那笔订单自动换新编号，两笔都保留。
+  id: '20261014-restore-2BX-1980-hour-Sivmey',
+  describe: '补回丢失的合同 2BX-1980(hour Sivmey, CL202606002)，状态按回款判断',
+  expectAdd: 1,
+  apply(loans, fin, notes) {
+    const REC = {"id": "CL202606002", "date": "2026-06-18", "name": "hour Sivmey", "note": "汽车抵押-正常贷款(导入自贵总6月表,序号53)。已收本金$3000/利息$330,未还本金$8000/利息$165。", "rate": 1.5, "term": 4, "agent": "LI", "brand": "Ford Ranger Raptor", "color": "", "model": "", "phone": "855-81454142", "plate": "2BX-1980", "repay": "先息后本", "amount": 11000, "idcard": "", "status": "active", "haircut": 10, "monthly": 165, "estimate": 0, "schedule": [{"total": 1665, "period": 1, "dueDate": "2026-07-18", "interest": 165, "principal": 1500}, {"total": 1665, "period": 2, "dueDate": "2026-08-18", "interest": 165, "principal": 1500}, {"total": 1665, "period": 3, "dueDate": "2026-09-18", "interest": 165, "principal": 1500}, {"total": 6500, "period": 4, "dueDate": "2026-10-18", "interest": 0, "principal": 6500}], "totalRepay": 11495, "actualAmount": 9900, "totalInterest": 495, "customSchedule": [{"dueDate": "2026-07-18", "interest": 165, "principal": 1500}, {"dueDate": "2026-08-18", "interest": 165, "principal": 1500}, {"dueDate": "2026-09-18", "interest": 165, "principal": 1500}, {"dueDate": "2026-10-18", "interest": 0, "principal": 6500}]};
+    const exists = loans.some(l => normPlate(l.plate) === '2BX-1980' || String(l.name || '').trim().toLowerCase() === 'hour sivmey');
+    if (exists) return false;
+    // 编号被别的订单占着 → 占用者换新编号
+    loans.forEach(l => {
+      if (l.id !== REC.id) return;
+      const m = String(l.date || '').slice(0, 7).replace('-', '');
+      const prefix = 'CL' + (m.length === 6 ? m : '202610');
+      let n = 0;
+      loans.forEach(x => { if (x.id && x.id.startsWith(prefix)) { const k = parseInt(x.id.slice(-3)) || 0; if (k > n) n = k; } });
+      const oldId = l.id;
+      l.id = prefix + String(n + 1).padStart(3, '0');
+      l.note = (l.note ? l.note + ' ' : '') + '[系统修正：原编号 ' + oldId + ' 要还给 2BX-1980(hour Sivmey)，已改为新编号]';
+      notes.push({ id: l.id, summary: '重复编号修正：' + summarizeLoanRecord(l) + ' ｜ 原编号 ' + oldId + ' → 新编号 ' + l.id });
+    });
+    const rec = JSON.parse(JSON.stringify(REC));
+    const got = principalOf(fin, rec.id);
+    rec.status = (got >= rec.amount - 0.005) ? 'closed' : 'active';
+    rec.note = (rec.note ? rec.note + ' ' : '') + '[系统找回：该合同在系统里丢失，已从9月26日备份恢复；本金已收回 $' + got + ']';
+    loans.unshift(rec);
+    notes.push({ id: rec.id, summary: '找回丢失的合同：' + summarizeLoanRecord(rec) + ' ｜ 状态：' + (rec.status === 'closed' ? '已结清（本金已全部收回）' : '还款中') });
+    return true;
+  }
 }];
 async function runDataMigrations() {
   try {
@@ -903,7 +935,7 @@ async function runDataMigrations() {
       const notes = [];
       const changed = m.apply(loans, fin, notes);
       if (changed) {
-        if (loans.length !== current.car_loans.length || fin.length !== current.car_finance.length) throw new Error('修正会改变记录条数，已中止：' + m.id);
+        if (loans.length - current.car_loans.length !== (m.expectAdd || 0) || fin.length !== current.car_finance.length) throw new Error('修正会改变记录条数，已中止：' + m.id);
         await maybeAutoSnapshot(sysUser, current, '自动数据修正前', true);
         const { error } = await supabase.from('pawndata').upsert([{ key: 'car_loans', value: loans }], { onConflict: 'key' });
         if (error) throw new Error('写入失败：' + error.message);
