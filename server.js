@@ -688,6 +688,20 @@ app.post('/api/data', auth, async (req, res) => {
           return res.status(409).json({ error: 'UNEXPECTED_REMOVAL', message: '检测到这次保存会让 ' + unexpected.length + ' 条记录意外消失（例如 ' + unexpected[0].id + '），为保护数据已拒绝。请刷新页面后重试；如果确实想删除，请用页面上的删除按钮。' });
         }
       }
+      // 2026-10-14 编号不许重复：保存结果里如果出现"库里原本没有的重复编号"，直接拒绝。
+      // （库里已经存在的历史重复编号先放行，让管理员能用"修复重复编号"工具修好；工具只会减少重复。）
+      if (key === 'car_loans' || key === 'car_finance') {
+        const dupOf = arr => { const seen = new Set(), dup = new Set(); (Array.isArray(arr) ? arr : []).forEach(x => { if (x && x.id != null) { if (seen.has(x.id)) dup.add(x.id); else seen.add(x.id); } }); return dup; };
+        const newDup = dupOf(check.mergedValue);
+        if (newDup.size > 0) {
+          const oldDup = dupOf(current && current[key]);
+          const bad = [...newDup].find(id => !oldDup.has(id));
+          if (bad !== undefined) {
+            console.error('拒绝重复编号：用户 ' + req.user.username + ' 的这次保存会让 ' + key + ' 里出现重复编号 ' + bad);
+            return res.status(409).json({ error: 'DUPLICATE_ID', message: '编号 ' + bad + ' 会和已有记录重复，为避免订单/回款串号已拒绝。请刷新页面后重试' });
+          }
+        }
+      }
       finalValues[key] = check.mergedValue;
       const beforeMap = new Map(((current && Array.isArray(current[key])) ? current[key] : []).map(x => [x.id, x]));
       logBatches.push({ key, added: check.added, edited: check.edited, removed: check.removed, before: beforeMap });
