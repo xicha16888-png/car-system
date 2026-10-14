@@ -707,6 +707,48 @@ app.post('/api/data', auth, async (req, res) => {
       logBatches.push({ key, added: check.added, edited: check.edited, removed: check.removed, before: beforeMap });
     }
 
+    // 2026-10-14 业务员不能手动乱改"已结清"状态（曾出现：业务员把 A 车误标成已结清，真正还清的 B 车反而没结清）：
+    // ①业务员把合同改成已结清，必须是"本金已全部收回"；②已结清的合同业务员不能改回别的状态（只有老板能改）。
+    if (req.user.role === 'sales' && current) {
+      const finAll = Array.isArray(finalValues.car_finance) ? finalValues.car_finance : (Array.isArray(current.car_finance) ? current.car_finance : []);
+      for (const b of logBatches) {
+        if (b.key !== 'car_loans') continue;
+        for (const r of b.edited) {
+          const old = b.before.get(r.id);
+          if (!old || old.status === r.status) continue;
+          if (r.status === 'closed' && r.assetType !== 'acquired') {
+            const got = finAll.filter(x => x.loanId === r.id && x.category === '本金回收').reduce((a, x) => a + (Number(x.amount) || 0), 0);
+            if (got < (r.amount || 0) - 0.005) {
+              return res.status(403).json({ error: 'PERMISSION_DENIED', message: '合同 ' + r.id + '（' + (r.name || '') + '）本金还没有全部收回，业务员不能标记已结清。请先登记完回款，系统会在本金收完时自动结清；如确有特殊情况请联系老板' });
+            }
+          }
+          if (old.status === 'closed' && r.status !== 'closed') {
+            return res.status(403).json({ error: 'PERMISSION_DENIED', message: '合同 ' + r.id + ' 已结清，业务员不能改回其他状态，请联系老板' });
+          }
+        }
+      }
+    }
+    // 2026-10-14 本金收完自动结清：登记的回款让某张合同"累计本金回收 ≥ 贷款金额"时，服务器直接把它标成已结清。
+    // （业务员的页面看不到财务金额，自己算不出"本金是否收完"，以前只能靠手动改状态，容易改错车。）
+    const autoClosed = [];
+    if (current && Array.isArray(finalValues.car_finance)) {
+      const addedPrincipal = logBatches.filter(b => b.key === 'car_finance').flatMap(b => b.added).filter(r => r && r.category === '本金回收' && r.loanId);
+      if (addedPrincipal.length > 0) {
+        const loansArr = Array.isArray(finalValues.car_loans) ? finalValues.car_loans : (Array.isArray(current.car_loans) ? current.car_loans : []);
+        const ids = [...new Set(addedPrincipal.map(r => r.loanId))];
+        const newLoans = loansArr.map(l => Object.assign({}, l));
+        ids.forEach(id => {
+          const hits = newLoans.filter(l => l.id === id);
+          if (hits.length !== 1) return; // 编号重复/找不到，不自动动
+          const l = hits[0];
+          if (l.assetType === 'acquired' || l.status === 'closed' || l.status === 'pending' || !(l.amount > 0)) return;
+          const got = finalValues.car_finance.filter(x => x.loanId === id && x.category === '本金回收').reduce((a, x) => a + (Number(x.amount) || 0), 0);
+          if (got >= l.amount - 0.005) { const oldSt = l.status; l.status = 'closed'; autoClosed.push({ rec: l, oldSt, got }); }
+        });
+        if (autoClosed.length > 0) finalValues.car_loans = newLoans;
+      }
+    }
+
     // 保存之前先存一份"保存前的完整数据"快照（有删除/整体覆盖时强制存，否则每6小时存一份）
     if (current) {
       const hasRemoval = logBatches.some(b => b.removed.length > 0);
@@ -717,7 +759,7 @@ app.post('/api/data', auth, async (req, res) => {
       await maybeAutoSnapshot(req.user, current, forcedReason || (bulkReplace ? '整体恢复覆盖前' : (hasRemoval ? '删除记录前' : (identityChanged ? '合同客户/车牌被修改前' : '定时'))), !!forcedReason || bulkReplace || hasRemoval || identityChanged);
     }
 
-    const rows = keys.map(key => ({ key, value: finalValues[key] }));
+    const rows = Object.keys(finalValues).map(key => ({ key, value: finalValues[key] })); // 含自动结清顺带改的 car_loans
     const { error } = await supabase.from('pawndata').upsert(rows, { onConflict: 'key' });
     if (error) return res.status(500).json({ error: error.message });
 
@@ -725,6 +767,11 @@ app.post('/api/data', auth, async (req, res) => {
     try {
       let hasEntries = false;
       logBatches.forEach(b => { if (logDataChanges(req.user, b.key, b.added, b.edited, b.removed, b.before).length > 0) hasEntries = true; });
+      autoClosed.forEach(a => {
+        OPLOG = [{ id: genOpId(), time: new Date().toISOString(), username: 'system', displayName: '系统自动结清', role: 'boss', dataKey: 'car_loans', action: 'edit', targetId: a.rec.id, summary: '本金已全部收回($' + a.got + ')，自动标记已结清：' + summarizeLoanRecord(a.rec) }].concat(OPLOG);
+        hasEntries = true;
+      });
+      if (OPLOG.length > OPLOG_MAX) OPLOG = OPLOG.slice(0, OPLOG_MAX);
       if (hasEntries) await persistOplog();
     } catch (logErr) {
       console.error('操作日志写入失败（不影响本次数据保存）：', logErr.message);
@@ -784,7 +831,101 @@ app.get('/api/backup', auth, async (req, res) => {
   }
 });
 
-Promise.all([initUsers(), initOplog()]).finally(() => {
+
+// ══════════════════════════════════════════════════════════
+// ══ 一次性数据修正（启动时自动执行，每条只跑一次）══
+// 2026-10-14：线上数据里有几处已经确认的错误（见每条 describe），老板不会也不需要自己去页面里改——
+// 部署后服务器启动时自动修好。安全措施：①执行前先强制存一份完整快照（"自动快照"页可下载）；
+// ②每一步都带"前置条件"校验（客户/车牌/编号/回款合计都对得上才动手，对不上就不改）；
+// ③只改状态/编号，绝不删除任何合同或财务记录；④每次改动都写进操作日志；⑤出任何错都不影响系统启动，
+// 下次启动会重试（成功后才会标记为已完成）。
+// ══════════════════════════════════════════════════════════
+const MIGRATIONS_KEY = 'car_migrations';
+const normPlate = v => String(v || '').replace(/\s+/g, '').toUpperCase();
+const principalOf = (fin, id) => fin.filter(r => r.loanId === id && r.category === '本金回收').reduce((a, r) => a + (Number(r.amount) || 0), 0);
+const DATA_MIGRATIONS = [{
+  id: '20261014-fix-status-2AW-2BX-and-dup-CL202606002',
+  describe: '①编号 CL202606002 被两笔订单同时占用：2BX-1980(hour Sivmey)继续用，另一笔换新编号；②2BX-1980 本金已全部收回→改为已结清；③2AW-8077 本金没收完却被标成已结清→改回还款中',
+  apply(loans, fin, notes) {
+    let changed = false;
+    // ① 重复编号
+    const DUP = 'CL202606002';
+    if (loans.filter(l => l.id === DUP).length > 1) {
+      const keepIdx = loans.findIndex(l => l.id === DUP && normPlate(l.plate) === '2BX-1980');
+      if (keepIdx >= 0) {
+        loans.forEach((l, i) => {
+          if (l.id !== DUP || i === keepIdx) return;
+          const m = String(l.date || '').slice(0, 7).replace('-', '');
+          const prefix = 'CL' + (m.length === 6 ? m : '202610');
+          let n = 0;
+          loans.forEach(x => { if (x.id && x.id.startsWith(prefix)) { const k = parseInt(x.id.slice(-3)) || 0; if (k > n) n = k; } });
+          l.id = prefix + String(n + 1).padStart(3, '0');
+          l.note = (l.note ? l.note + ' ' : '') + '[系统修正：原编号 ' + DUP + ' 与另一笔订单重复，已改为新编号]';
+          notes.push({ id: l.id, summary: '重复编号修正：' + summarizeLoanRecord(l) + ' ｜ 原编号 ' + DUP + ' → 新编号 ' + l.id + '（与 2BX-1980 重复）' });
+          changed = true;
+        });
+      }
+    }
+    // ② 2BX-1980：本金全部收回 → 已结清
+    const bx = loans.filter(l => l.id === DUP && normPlate(l.plate) === '2BX-1980');
+    if (bx.length === 1 && bx[0].status !== 'closed' && bx[0].assetType !== 'acquired') {
+      const got = principalOf(fin, bx[0].id);
+      if ((bx[0].amount || 0) > 0 && got >= bx[0].amount - 0.005) {
+        const oldSt = bx[0].status; bx[0].status = 'closed'; changed = true;
+        notes.push({ id: bx[0].id, summary: '状态修正：' + summarizeLoanRecord(bx[0]) + ' ｜ 本金已收回 $' + got + '，状态 ' + oldSt + ' → 已结清' });
+      }
+    }
+    // ③ 2AW-8077：本金没收完却被标成已结清 → 还款中
+    const aw = loans.filter(l => l.id === 'CL202607001' && normPlate(l.plate) === '2AW-8077');
+    if (aw.length === 1 && aw[0].status === 'closed' && aw[0].assetType !== 'acquired') {
+      const got = principalOf(fin, aw[0].id);
+      if (got < (aw[0].amount || 0) - 0.005) {
+        aw[0].status = 'active'; changed = true;
+        notes.push({ id: aw[0].id, summary: '状态修正：' + summarizeLoanRecord(aw[0]) + ' ｜ 本金只收回 $' + got + '（贷款 $' + aw[0].amount + '），被误标已结清 → 改回还款中' });
+      }
+    }
+    return changed;
+  }
+}];
+async function runDataMigrations() {
+  try {
+    const { data: mrow, error: merr } = await supabase.from('pawndata').select('value').eq('key', MIGRATIONS_KEY).maybeSingle();
+    if (merr) throw new Error('DB_READ_ERROR: ' + merr.message);
+    const done = (mrow && Array.isArray(mrow.value)) ? mrow.value.slice() : [];
+    const pending = DATA_MIGRATIONS.filter(m => !done.includes(m.id));
+    if (pending.length === 0) return;
+    let current = await loadData();
+    if (!Array.isArray(current.car_loans) || !Array.isArray(current.car_finance)) throw new Error('数据格式异常，跳过自动修正');
+    const sysUser = { username: 'system', displayName: '系统数据修正', role: 'boss' };
+    for (const m of pending) {
+      const loans = JSON.parse(JSON.stringify(current.car_loans));
+      const fin = JSON.parse(JSON.stringify(current.car_finance));
+      const notes = [];
+      const changed = m.apply(loans, fin, notes);
+      if (changed) {
+        if (loans.length !== current.car_loans.length || fin.length !== current.car_finance.length) throw new Error('修正会改变记录条数，已中止：' + m.id);
+        await maybeAutoSnapshot(sysUser, current, '自动数据修正前', true);
+        const { error } = await supabase.from('pawndata').upsert([{ key: 'car_loans', value: loans }], { onConflict: 'key' });
+        if (error) throw new Error('写入失败：' + error.message);
+        const now = new Date().toISOString();
+        OPLOG = notes.map(n => ({ id: genOpId(), time: now, username: sysUser.username, displayName: sysUser.displayName, role: 'boss', dataKey: 'car_loans', action: 'edit', targetId: n.id, summary: n.summary })).concat(OPLOG);
+        if (OPLOG.length > OPLOG_MAX) OPLOG = OPLOG.slice(0, OPLOG_MAX);
+        await persistOplog();
+        current = Object.assign({}, current, { car_loans: loans });
+        console.log('  数据修正已执行：' + m.id + '（' + notes.length + ' 项）');
+      } else {
+        console.log('  数据修正无需执行（数据已是正确状态或条件不符）：' + m.id);
+      }
+      done.push(m.id);
+      const { error: e2 } = await supabase.from('pawndata').upsert([{ key: MIGRATIONS_KEY, value: done }], { onConflict: 'key' });
+      if (e2) throw new Error('迁移标记写入失败：' + e2.message);
+    }
+  } catch (e) {
+    console.error('  自动数据修正失败（不影响系统启动，下次启动会重试）：', e.message);
+  }
+}
+
+Promise.all([initUsers(), initOplog()]).then(() => runDataMigrations()).catch(e => console.error('启动初始化异常：', e && e.message)).finally(() => {
   app.listen(PORT, () => {
     console.log(`\n${'═'.repeat(50)}`);
     console.log(`  🚗 MORODOK 汽车抵押贷款管理系统`);
