@@ -556,12 +556,26 @@ async function logAccountChange(user, action, targetDisplay, summary) {
 }
 
 // 把 checkKeyPermission 算出来的 added/edited/removed 转成一条条日志，追加进 OPLOG
-function logDataChanges(user, key, added, edited, removed) {
+// 2026-10-14：贷款记录被"编辑"时，如果客户姓名/车牌变了（正常编辑几乎不会改这两个，一旦变了
+// 基本就是被别的单子覆盖了），日志里除了新内容，还要把"修改前"的客户/车牌/金额一并写下来——
+// 这样哪怕以后真被覆盖，从操作日志里也能看到原来那笔是谁、多少钱，能照着补回。
+function loanIdentityChanged(oldRec, newRec) {
+  return !!(oldRec && newRec && (oldRec.name !== newRec.name || oldRec.plate !== newRec.plate));
+}
+function logDataChanges(user, key, added, edited, removed, before) {
   const summarize = key === 'car_loans' ? summarizeLoanRecord : summarizeFinanceRecord;
   const now = new Date().toISOString();
   const entries = [];
   (added || []).forEach(r => entries.push({ id: genOpId(), time: now, username: user.username, displayName: user.displayName, role: user.role, dataKey: key, action: 'add', targetId: r.id, summary: summarize(r) }));
-  (edited || []).forEach(r => entries.push({ id: genOpId(), time: now, username: user.username, displayName: user.displayName, role: user.role, dataKey: key, action: 'edit', targetId: r.id, summary: summarize(r) }));
+  (edited || []).forEach(r => {
+    let summary = summarize(r);
+    const old = before && before.get ? before.get(r.id) : null;
+    if (key === 'car_loans' && old) {
+      const changed = loanIdentityChanged(old, r);
+      if (changed || old.amount !== r.amount) summary = (changed ? '⚠️客户/车牌被改！' : '') + summary + ' ｜ 修改前：' + summarize(old) + (old.date ? '（放款日 ' + old.date + '）' : '');
+    }
+    entries.push({ id: genOpId(), time: now, username: user.username, displayName: user.displayName, role: user.role, dataKey: key, action: 'edit', targetId: r.id, summary });
+  });
   (removed || []).forEach(r => entries.push({ id: genOpId(), time: now, username: user.username, displayName: user.displayName, role: user.role, dataKey: key, action: 'delete', targetId: r.id, summary: summarize(r) }));
   if (entries.length === 0) return entries;
   OPLOG = entries.concat(OPLOG); // 最新的放最前面
@@ -654,6 +668,18 @@ app.post('/api/data', auth, async (req, res) => {
       }
       const check = checkKeyPermission(req.user, key, body[key], current);
       if (!check.ok) return res.status(403).json({ error: 'PERMISSION_DENIED', message: check.reason });
+      // 2026-10-14 新增"撞号拒绝"：客户端声明"这次是新增的记录ID"，如果这些ID在数据库里已经存在，
+      // 说明两个人几乎同时新增、拿到了同一个编号。以前服务器会把后到的那条当成"编辑"，直接覆盖先到的
+      // 那条（订单凭空被盖掉）；现在直接拒绝，让客户端重新生成编号再提交。
+      const declaredNew = (body && body._newIds && Array.isArray(body._newIds[key])) ? body._newIds[key] : [];
+      if (declaredNew.length > 0 && current && Array.isArray(current[key])) {
+        const existing = new Set(current[key].map(x => x.id));
+        const clash = declaredNew.find(id => existing.has(id));
+        if (clash) {
+          console.error('拒绝撞号：用户 ' + req.user.username + ' 新增的 ' + key + ' 记录 ' + clash + ' 在库里已存在');
+          return res.status(409).json({ error: 'ID_COLLISION', message: '编号 ' + clash + ' 刚被别人用掉了，请重试' });
+        }
+      }
       if (check.removed.length > 0 && !bulkReplace) {
         const okIds = new Set(Array.isArray(intendedRemovals[key]) ? intendedRemovals[key] : []);
         const unexpected = check.removed.filter(r => !okIds.has(r.id));
@@ -663,13 +689,18 @@ app.post('/api/data', auth, async (req, res) => {
         }
       }
       finalValues[key] = check.mergedValue;
-      logBatches.push({ key, added: check.added, edited: check.edited, removed: check.removed });
+      const beforeMap = new Map(((current && Array.isArray(current[key])) ? current[key] : []).map(x => [x.id, x]));
+      logBatches.push({ key, added: check.added, edited: check.edited, removed: check.removed, before: beforeMap });
     }
 
     // 保存之前先存一份"保存前的完整数据"快照（有删除/整体覆盖时强制存，否则每6小时存一份）
     if (current) {
       const hasRemoval = logBatches.some(b => b.removed.length > 0);
-      await maybeAutoSnapshot(req.user, current, bulkReplace ? '整体恢复覆盖前' : (hasRemoval ? '删除记录前' : '定时'), bulkReplace || hasRemoval);
+      // 贷款的客户姓名/车牌被改成别人（疑似订单被覆盖），同样强制先留快照
+      const identityChanged = logBatches.some(b => b.key === 'car_loans' && b.edited.some(r => loanIdentityChanged(b.before.get(r.id), r)));
+      // 系统管理员做"批量整理"类操作（如修复重复编号）时，客户端带 _snapshotReason，强制先留一份快照
+      const forcedReason = (req.user.role === 'boss' && req.user.isSuperAdmin && body && typeof body._snapshotReason === 'string') ? body._snapshotReason.slice(0, 40) : '';
+      await maybeAutoSnapshot(req.user, current, forcedReason || (bulkReplace ? '整体恢复覆盖前' : (hasRemoval ? '删除记录前' : (identityChanged ? '合同客户/车牌被修改前' : '定时'))), !!forcedReason || bulkReplace || hasRemoval || identityChanged);
     }
 
     const rows = keys.map(key => ({ key, value: finalValues[key] }));
@@ -679,7 +710,7 @@ app.post('/api/data', auth, async (req, res) => {
     // 数据写库成功之后再记操作日志（日志写失败也不影响这次保存本身，只打日志到控制台）
     try {
       let hasEntries = false;
-      logBatches.forEach(b => { if (logDataChanges(req.user, b.key, b.added, b.edited, b.removed).length > 0) hasEntries = true; });
+      logBatches.forEach(b => { if (logDataChanges(req.user, b.key, b.added, b.edited, b.removed, b.before).length > 0) hasEntries = true; });
       if (hasEntries) await persistOplog();
     } catch (logErr) {
       console.error('操作日志写入失败（不影响本次数据保存）：', logErr.message);
