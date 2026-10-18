@@ -251,7 +251,7 @@ html,body{overflow:auto;height:auto}
 
 // ══ 版本号：老板每次改完系统、贴到GitHub部署新版之后，把这个数字改一下 ══
 // （改哪一位都行，只要跟上一个版本不一样，业务员浏览器就能感知到"有新版本"）
-var APP_VERSION = "20261018a";
+var APP_VERSION = "20261018b";
 var _pendingUpdate = false;   // 已经检测到线上有新版本，还没刷新
 var _updateSnoozed = false;   // 业务员点了"稍后"，先别再弹倒计时打扰他
 // 只在这些"纯浏览/看报表"页面允许直接自动刷新——凡是可能正在填表/登记的页面
@@ -688,10 +688,10 @@ var _payMonth = "";
 var _payTab = "sheet";
 var _staffFormOpen = false, _staffEditId = null;
 var _dailyMonth = "", _dailyCat = "", _dailyQ = "";
-var _dailyBusy = false, _payBusy = false;
+var _dailyBusy = false, _payBusy = false, _dailyEditId = null;
 var DAILY_CATS = ["房租","水电网费","员工餐费","办公用品","交通油费","招待应酬","通讯费","维修保养","报销杂费","介绍费","其他日常开支"];
 var LEGACY_EXP_CATS = ["办公费用","推广费用","车辆评估费","其他支出"];
-function canEditPayroll() { return CURRENT_ROLE==="boss"; }
+function canEditPayroll() { return isSuperAdmin(); } // 员工档案/工资表只有"boss"这个主账号能改，其他老板账号（如gui）和财务只读
 function pr2(x) { var n = Number(x)||0; return Math.round((n + (n>=0?1:-1)*1e-9)*100)/100; }
 function hesc(s) { return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function pmoney(n) { return "$" + (Number(n)||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -774,7 +774,7 @@ function renderPayroll() {
     var ms = _payroll.map(function(r){ return r.month; }).sort();
     _payMonth = ms.length ? ms[ms.length-1] : ymAdd(curYM(), -1);
   }
-  var h = '<div class="page-header"><div class="page-title">👷 员工工资</div><div class="page-sub">员工档案 + 月度工资表。确认发放后，系统自动在财务里记一笔"工资支出"，利润表/现金流/日常开支同步带上'+(canEditPayroll()?'':'（你的账号为只读）')+'</div></div>';
+  var h = '<div class="page-header"><div class="page-title">👷 员工工资</div><div class="page-sub">员工档案 + 月度工资表。确认发放后，系统自动在财务里记一笔"工资支出"，利润表/现金流/日常开支同步带上'+(canEditPayroll()?'':'（你的账号为只读，只有 boss 主账号能修改）')+'</div></div>';
   h += '<div class="search-row" style="margin-bottom:14px"><button class="btn '+(_payTab==="sheet"?'btn-primary':'btn-outline')+'" onclick="_payTab=\'sheet\';renderPayroll()">📋 月度工资表</button><button class="btn '+(_payTab==="staff"?'btn-primary':'btn-outline')+'" onclick="_payTab=\'staff\';renderPayroll()">👥 员工档案</button></div>';
   h += (_payTab==="staff") ? payrollStaffHtml() : payrollSheetHtml();
   document.getElementById("mainContent").innerHTML = h;
@@ -1159,7 +1159,7 @@ function renderDailyExpense() {
   var sum = function(a){ return pr2(a.reduce(function(s,r){ return s + (Number(r.amount)||0); }, 0)); };
   var months = {}; _financeRecords.forEach(function(r){ if(r.type==="expense" && r.date) months[String(r.date).slice(0,7)] = 1; });
   months[curYM()] = 1; months[_dailyMonth] = 1;
-  var h = '<div class="page-header"><div class="page-title">🛒 日常开支</div><div class="page-sub">按月查看全部支出（含员工工资），按分类汇总，快速登记房租/水电/餐费等；同样会进入利润表和现金流'+(canAdd?'':'（你的账号为只读）')+'</div></div>';
+  var h = '<div class="page-header"><div class="page-title">🛒 日常开支</div><div class="page-sub">按月查看全部支出（含员工工资），按分类汇总，登记/修改房租、水电、餐费等；同样会进入利润表和现金流'+(canAdd?'':'（你的账号为只读）')+'</div></div>';
   h += '<div class="search-row"><select id="dailyMonthSel" onchange="_dailyMonth=this.value;renderDailyExpense()">';
   Object.keys(months).sort().reverse().forEach(function(m){ h += '<option value="'+m+'"'+(m===_dailyMonth?' selected':'')+'>'+m+'</option>'; });
   h += '</select></div>';
@@ -1181,12 +1181,15 @@ function renderDailyExpense() {
   h += '</div>';
   // 登记表单
   if(canAdd) {
-    h += '<div class="card"><div class="card-title" style="margin-bottom:12px">➕ 登记一笔日常开支</div><div class="form-grid">';
-    h += '<div class="form-group"><label>日期</label><input type="date" id="de_date" value="'+todayStr()+'"></div>';
-    h += '<div class="form-group"><label>金额（$）*</label><input type="number" step="0.01" min="0" id="de_amount"></div>';
-    h += '<div class="form-group"><label>分类</label><select id="de_cat">'+DAILY_CATS.map(function(c){ return '<option value="'+c+'">'+c+'</option>'; }).join('')+'<optgroup label="其他分类">'+LEGACY_EXP_CATS.map(function(c){ return '<option value="'+c+'">'+c+'</option>'; }).join('')+'</optgroup></select></div>';
-    h += '<div class="form-group span3"><label>说明（付给谁/什么用途）</label><input type="text" id="de_note" placeholder="如：10月办公室租金 / 员工午餐"></div>';
-    h += '</div><div class="btn-row"><button class="btn btn-primary" onclick="saveDailyExpense()">✅ 保存</button></div><div style="font-size:11px;color:var(--muted);margin-top:8px">员工工资请到「员工工资」页面确认发放，系统会自动入账，不用在这里重复登记。</div></div>';
+    var ed = _dailyEditId ? _financeRecords.find(function(r){ return r.id===_dailyEditId; }) : null;
+    if(_dailyEditId && !ed) _dailyEditId = null;
+    var catList = DAILY_CATS.concat(LEGACY_EXP_CATS); if(ed && catList.indexOf(ed.category)<0) catList.push(ed.category);
+    h += '<div class="card" id="dailyFormCard"'+(ed?' style="border:2px solid #ffa726"':'')+'><div class="card-title" style="margin-bottom:12px">'+(ed?'✏️ 修改这笔支出（'+hesc(ed.id)+'）':'➕ 登记一笔日常开支')+'</div><div class="form-grid">';
+    h += '<div class="form-group"><label>日期</label><input type="date" id="de_date" value="'+(ed?hesc(String(ed.date).slice(0,10)):todayStr())+'"></div>';
+    h += '<div class="form-group"><label>金额（$）*</label><input type="number" step="0.01" min="0" id="de_amount" value="'+(ed?ed.amount:'')+'"></div>';
+    h += '<div class="form-group"><label>分类</label><select id="de_cat">'+catList.map(function(c){ return '<option value="'+hesc(c)+'"'+(ed&&ed.category===c?' selected':'')+'>'+hesc(c)+'</option>'; }).join('')+'</select></div>';
+    h += '<div class="form-group span3"><label>说明（付给谁/什么用途）</label><input type="text" id="de_note" placeholder="如：10月办公室租金 / 员工午餐" value="'+(ed?hesc(ed.note||""):'')+'"></div>';
+    h += '</div><div class="btn-row"><button class="btn btn-primary" onclick="saveDailyExpense()">'+(ed?'✅ 保存修改':'✅ 保存')+'</button>'+(ed?'<button class="btn btn-outline" onclick="_dailyEditId=null;renderDailyExpense()">取消修改</button>':'')+'</div><div style="font-size:11px;color:var(--muted);margin-top:8px">员工工资请到「员工工资」页面确认发放，系统会自动入账，不用在这里重复登记。</div></div>';
   }
   // 明细
   var filtered = all.filter(function(r){ return (!_dailyCat || r.category===_dailyCat) && (!_dailyQ || (String(r.note||"")+r.category).toLowerCase().indexOf(_dailyQ.toLowerCase())>=0); });
@@ -1199,7 +1202,8 @@ function renderDailyExpense() {
     filtered.forEach(function(r){
       var fromPay = !!r.payrollMonth;
       h += '<tr><td>'+formatDate(r.date)+'</td><td>'+hesc(r.category)+(fromPay?' <span class="badge badge-blue">工资表</span>':'')+'</td><td style="font-weight:600;color:#c62828">'+pmoney(r.amount)+'</td><td style="font-size:12px;color:var(--muted)">'+hesc(r.note||"")+(r.loanId?' · 关联'+hesc(r.loanId):'')+'</td>';
-      h += '<td>'+(fromPay ? '<span style="font-size:12px;color:var(--muted)">在「员工工资」页处理</span>' : (canDelete()?'<button class="btn btn-sm btn-danger" onclick="deleteDailyExpense(\''+r.id+'\')">删除</button>':'<span style="font-size:12px;color:var(--muted)">只读</span>'))+'</td></tr>';
+      var canEditRow = canAdd && !fromPay && !r.loanId;
+      h += '<td>'+(fromPay ? '<span style="font-size:12px;color:var(--muted)">在「员工工资」页处理</span>' : ((canEditRow?'<button class="btn btn-sm btn-outline" onclick="editDailyExpense(\''+r.id+'\')">编辑</button> ':'')+(canDelete()?'<button class="btn btn-sm btn-danger" onclick="deleteDailyExpense(\''+r.id+'\')">删除</button>':(canEditRow?'':'<span style="font-size:12px;color:var(--muted)">只读</span>'))))+'</td></tr>';
     });
     h += '<tr style="background:#fafafa;font-weight:700"><td colspan="2">合计</td><td style="color:#c62828">'+pmoney(sum(filtered))+'</td><td colspan="2"></td></tr>';
     h += '</tbody></table></div>';
@@ -1207,14 +1211,36 @@ function renderDailyExpense() {
   h += '</div>';
   document.getElementById("mainContent").innerHTML = h;
 }
+function editDailyExpense(id) {
+  if(CURRENT_ROLE!=="boss") return;
+  var r = _financeRecords.find(function(x){ return x.id===id; });
+  if(!r || r.payrollMonth || r.loanId) return;
+  _dailyEditId = id; renderDailyExpense();
+  var c = document.getElementById("dailyFormCard"); if(c && c.scrollIntoView) c.scrollIntoView({behavior:"smooth",block:"center"});
+}
 async function saveDailyExpense() {
   if(CURRENT_ROLE!=="boss" || _dailyBusy) return;
   var amount = parseFloat(document.getElementById("de_amount").value);
   if(!amount || amount<=0) { alert("请输入有效的金额"); return; }
   var date = document.getElementById("de_date").value || todayStr();
-  var rec = { id:"F"+Date.now(), type:"expense", amount:amount, category:document.getElementById("de_cat").value, date:date, loanId:"", note:document.getElementById("de_note").value.trim() };
+  var editId = _dailyEditId;
+  var fields = { amount:amount, category:document.getElementById("de_cat").value, date:date, note:document.getElementById("de_note").value.trim() };
   _dailyBusy = true;
   try {
+    if(editId) {
+      var cur = _financeRecords.find(function(x){ return x.id===editId; });
+      if(!cur || cur.payrollMonth || cur.loanId) { alert("这条记录不能在这里修改"); _dailyEditId = null; renderDailyExpense(); return; }
+      var done = false;
+      var resE = await mutateData(null, function(fin){
+        return fin.map(function(r){ if(r.id===editId && !r.payrollMonth && !r.loanId) { done = true; return Object.assign({}, r, fields); } return r; });
+      });
+      if(!resE || !resE.ok) { alert("⚠️ 修改失败，请检查网络后重试"); return; }
+      if(!done) { alert("⚠️ 这条记录已经不存在（可能被别人删除了），没有做任何修改"); }
+      _dailyEditId = null; _dailyMonth = String(date).slice(0,7);
+      renderDailyExpense();
+      return;
+    }
+    var rec = Object.assign({ id:"F"+Date.now(), type:"expense", loanId:"" }, fields);
     var res = await mutateData(null, function(fin){ fin.unshift(rec); return fin; });
     if(!res || !res.ok) { alert("⚠️ 保存失败，请检查网络后重试"); return; }
     _dailyMonth = String(date).slice(0,7);
@@ -1226,6 +1252,7 @@ async function deleteDailyExpense(id) {
   var rec = _financeRecords.find(function(r){ return r.id===id; });
   if(rec && rec.payrollMonth) { alert("这笔来自工资表，请到「员工工资」页处理"); return; }
   if(!requireDeletePassword("删除这条支出记录")) return;
+  if(_dailyEditId===id) _dailyEditId = null;
   await mutateData(null, function(fin){ return fin.filter(function(r){ return r.id!==id; }); });
   renderDailyExpense();
 }
