@@ -251,7 +251,7 @@ html,body{overflow:auto;height:auto}
 
 // ══ 版本号：老板每次改完系统、贴到GitHub部署新版之后，把这个数字改一下 ══
 // （改哪一位都行，只要跟上一个版本不一样，业务员浏览器就能感知到"有新版本"）
-var APP_VERSION = "20261018b";
+var APP_VERSION = "20261018c";
 var _pendingUpdate = false;   // 已经检测到线上有新版本，还没刷新
 var _updateSnoozed = false;   // 业务员点了"稍后"，先别再弹倒计时打扰他
 // 只在这些"纯浏览/看报表"页面允许直接自动刷新——凡是可能正在填表/登记的页面
@@ -1149,20 +1149,48 @@ async function toggleStaffStatus(id) {
 }
 
 // ══════════ 日常开支页 ══════════
+// 合同里填的"中间人介绍费"是公司放款时真实付出去的钱，利润表/现金流早就按它扣了——这里把它们也当成支出行带进日常开支（只读，来源是合同），
+// 这样日常开支一页就能看到全部支出。日期=放款日，跟利润表口径一致。
+function loanFeeExpenseRows() {
+  return loanRecords().filter(function(l){ return (l.middlemanFee||0)>0 && l.date; }).map(function(l){
+    return { id:"MF_"+l.id, type:"expense", category:"中间人介绍费", amount:l.middlemanFee, date:l.date, fromLoan:true, feeLoanId:l.id,
+      note:"合同 "+l.id+"（"+(l.name||"")+" "+(l.plate||"")+"）里填写的介绍费，自动带入" };
+  });
+}
+// 手动登记过、金额和说明里的车牌/合同号都对得上某张合同介绍费的支出 = 疑似重复登记（同一笔钱算了两次）
+function dupFeeLoanOf(r) {
+  if(r.fromLoan || r.payrollMonth || r.type!=="expense") return null;
+  var txt = (String(r.note||"")+" "+String(r.category||"")).toLowerCase();
+  var hit = null;
+  loanRecords().forEach(function(l){
+    if(hit || !((l.middlemanFee||0)>0)) return;
+    if(Math.abs((Number(r.amount)||0)-l.middlemanFee)>0.005) return;
+    var keys = [l.id, l.plate].filter(function(x){ return x && String(x).length>=4; });
+    if(keys.some(function(k){ return txt.indexOf(String(k).toLowerCase())>=0; })) hit = l;
+  });
+  return hit;
+}
+function dailyRowsOfMonth(ym) {
+  return _financeRecords.filter(function(r){ return r.type==="expense" && String(r.date||"").slice(0,7)===ym; })
+    .concat(loanFeeExpenseRows().filter(function(r){ return String(r.date).slice(0,7)===ym; }));
+}
 function renderDailyExpense() {
   if(!canViewFinance()) { alert("⛔ 你的账号没有权限查看日常开支"); nav("home"); return; }
   if(!_dailyMonth) _dailyMonth = curYM();
   var canAdd = CURRENT_ROLE==="boss";
-  var all = _financeRecords.filter(function(r){ return r.type==="expense" && String(r.date||"").slice(0,7)===_dailyMonth; });
+  var all = dailyRowsOfMonth(_dailyMonth);
   var salary = all.filter(function(r){ return r.category==="工资支出"; });
   var daily = all.filter(function(r){ return r.category!=="工资支出"; });
   var sum = function(a){ return pr2(a.reduce(function(s,r){ return s + (Number(r.amount)||0); }, 0)); };
   var months = {}; _financeRecords.forEach(function(r){ if(r.type==="expense" && r.date) months[String(r.date).slice(0,7)] = 1; });
+  loanFeeExpenseRows().forEach(function(r){ months[String(r.date).slice(0,7)] = 1; });
   months[curYM()] = 1; months[_dailyMonth] = 1;
-  var h = '<div class="page-header"><div class="page-title">🛒 日常开支</div><div class="page-sub">按月查看全部支出（含员工工资），按分类汇总，登记/修改房租、水电、餐费等；同样会进入利润表和现金流'+(canAdd?'':'（你的账号为只读）')+'</div></div>';
+  var dupRows = all.filter(function(r){ return !!dupFeeLoanOf(r); });
+  var h = '<div class="page-header"><div class="page-title">🛒 日常开支</div><div class="page-sub">按月查看全部支出（含员工工资），按分类汇总，登记/修改房租、水电、餐费等；合同里填的中间人介绍费也会自动列在这里；同样会进入利润表和现金流'+(canAdd?'':'（你的账号为只读）')+'</div></div>';
   h += '<div class="search-row"><select id="dailyMonthSel" onchange="_dailyMonth=this.value;renderDailyExpense()">';
   Object.keys(months).sort().reverse().forEach(function(m){ h += '<option value="'+m+'"'+(m===_dailyMonth?' selected':'')+'>'+m+'</option>'; });
   h += '</select></div>';
+  if(dupRows.length) h += '<div class="card" style="border:2px solid #e53935;background:#fff5f5"><b style="color:#c62828">⚠️ 发现 '+dupRows.length+' 笔疑似重复的介绍费</b><div style="font-size:12px;margin-top:6px;color:#555">合同里已经填了介绍费，系统会自动算进支出；下面标红的手动登记金额、车牌都对得上，很可能是同一笔钱重复登记了，请核对后删除手动登记的那条。</div></div>';
   h += '<div class="stats-grid" style="margin-bottom:14px">';
   h += '<div class="stat-card red"><div class="stat-label">'+_dailyMonth+' 总支出</div><div class="stat-value">'+pmoney(sum(all))+'</div><div class="stat-sub">'+all.length+' 笔</div></div>';
   h += '<div class="stat-card amber"><div class="stat-label">日常开支（不含工资）</div><div class="stat-value">'+pmoney(sum(daily))+'</div><div class="stat-sub">'+daily.length+' 笔</div></div>';
@@ -1201,9 +1229,10 @@ function renderDailyExpense() {
     h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>分类</th><th>金额</th><th>说明</th><th>操作</th></tr></thead><tbody>';
     filtered.forEach(function(r){
       var fromPay = !!r.payrollMonth;
-      h += '<tr><td>'+formatDate(r.date)+'</td><td>'+hesc(r.category)+(fromPay?' <span class="badge badge-blue">工资表</span>':'')+'</td><td style="font-weight:600;color:#c62828">'+pmoney(r.amount)+'</td><td style="font-size:12px;color:var(--muted)">'+hesc(r.note||"")+(r.loanId?' · 关联'+hesc(r.loanId):'')+'</td>';
-      var canEditRow = canAdd && !fromPay && !r.loanId;
-      h += '<td>'+(fromPay ? '<span style="font-size:12px;color:var(--muted)">在「员工工资」页处理</span>' : ((canEditRow?'<button class="btn btn-sm btn-outline" onclick="editDailyExpense(\''+r.id+'\')">编辑</button> ':'')+(canDelete()?'<button class="btn btn-sm btn-danger" onclick="deleteDailyExpense(\''+r.id+'\')">删除</button>':(canEditRow?'':'<span style="font-size:12px;color:var(--muted)">只读</span>'))))+'</td></tr>';
+      var dupL = dupFeeLoanOf(r);
+      h += '<tr'+(dupL?' style="background:#fff5f5"':'')+'><td>'+formatDate(r.date)+'</td><td>'+hesc(r.category)+(fromPay?' <span class="badge badge-blue">工资表</span>':'')+(r.fromLoan?' <span class="badge badge-amber">合同自动</span>':'')+(dupL?' <span class="badge" style="background:#ffebee;color:#c62828" title="合同 '+hesc(dupL.id)+' 里已经填了同样金额的介绍费">疑似重复</span>':'')+'</td><td style="font-weight:600;color:#c62828">'+pmoney(r.amount)+'</td><td style="font-size:12px;color:var(--muted)">'+hesc(r.note||"")+(r.loanId?' · 关联'+hesc(r.loanId):'')+(dupL?' <b style="color:#c62828">· 合同 '+hesc(dupL.id)+' 已填同样的介绍费，这条可能重复</b>':'')+'</td>';
+      var canEditRow = canAdd && !fromPay && !r.loanId && !r.fromLoan;
+      h += '<td>'+(r.fromLoan ? '<span style="font-size:12px;color:var(--muted)">在合同 '+hesc(r.feeLoanId)+' 里修改</span>' : fromPay ? '<span style="font-size:12px;color:var(--muted)">在「员工工资」页处理</span>' : ((canEditRow?'<button class="btn btn-sm btn-outline" onclick="editDailyExpense(\''+r.id+'\')">编辑</button> ':'')+(canDelete()?'<button class="btn btn-sm btn-danger" onclick="deleteDailyExpense(\''+r.id+'\')">删除</button>':(canEditRow?'':'<span style="font-size:12px;color:var(--muted)">只读</span>'))))+'</td></tr>';
     });
     h += '<tr style="background:#fafafa;font-weight:700"><td colspan="2">合计</td><td style="color:#c62828">'+pmoney(sum(filtered))+'</td><td colspan="2"></td></tr>';
     h += '</tbody></table></div>';
@@ -1257,9 +1286,9 @@ async function deleteDailyExpense(id) {
   renderDailyExpense();
 }
 function exportDailyCsv() {
-  var rows = _financeRecords.filter(function(r){ return r.type==="expense" && String(r.date||"").slice(0,7)===_dailyMonth; }).sort(function(a,b){ return String(a.date).localeCompare(String(b.date)); });
+  var rows = dailyRowsOfMonth(_dailyMonth).sort(function(a,b){ return String(a.date).localeCompare(String(b.date)); });
   var csv = ["日期,分类,金额,说明,合同编号"];
-  rows.forEach(function(r){ csv.push([r.date,r.category,r.amount,(r.note||"").replace(/,/g,"；"),r.loanId||""].join(",")); });
+  rows.forEach(function(r){ csv.push([r.date,r.category,r.amount,(r.note||"").replace(/,/g,"；"),r.loanId||r.feeLoanId||""].join(",")); });
   csv.push(["合计","",pr2(rows.reduce(function(s,r){ return s+(Number(r.amount)||0); },0)),"",""].join(","));
   var a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["﻿"+csv.join("\n")], {type:"text/csv;charset=utf-8"}));
@@ -1310,7 +1339,7 @@ function doBackup() {
   a.href = URL.createObjectURL(new Blob([j],{type:"application/json"}));
   a.download = "CAR_backup_"+today+".json"; a.click();
   var csv1 = ["编号,客户,手机,车牌,品牌,型号,颜色,评估价,贷款金额,实际放款,月利率%,期限,方式,状态,放款日,备注"];
-  loanRecords().forEach(function(l){csv1.push([l.id,l.name,l.phone,l.idcard||"",l.brand||"",l.model||"",l.color||"",l.estimate||0,l.amount,l.actualAmount||"",l.rate,l.term,l.repay||"",l.status,l.date,(l.note||"").replace(/,/g,"；")].join(","));});
+  loanRecords().forEach(function(l){csv1.push([l.id,l.name,l.phone,l.plate||"",l.brand||"",l.model||"",l.color||"",l.estimate||0,l.amount,l.actualAmount||"",l.rate,l.term,l.repay||"",l.status,l.date,(l.note||"").replace(/,/g,"；")].join(","));});
   setTimeout(function(){var a2=document.createElement("a");a2.href=URL.createObjectURL(new Blob(["﻿"+csv1.join("\n")],{type:"text/csv;charset=utf-8"}));a2.download="CAR_合同_"+today+".csv";a2.click();},300);
   var csv2 = ["编号,类型,金额,分类,日期,合同编号,备注"];
   _financeRecords.filter(function(r){return r.type==="income"||r.type==="expense";}).forEach(function(r){csv2.push([r.id,r.type==="income"?"收入":"支出",r.amount,r.category,r.date,r.loanId||"",(r.note||"").replace(/,/g,"；")].join(","));});
