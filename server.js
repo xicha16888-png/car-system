@@ -361,6 +361,10 @@ const ROLE_PERMS = {
   sales:   { car_loans: { add: true,  edit: true,  del: false }, car_finance: { add: 'business_repay', edit: false, del: false } },
   finance: { car_loans: { add: false, edit: false, del: false }, car_finance: { add: false,            edit: false, del: false } },
 };
+// 2026-10-18 新增"员工工资"：员工档案(car_staff)和月度工资表(car_payroll)。只有老板角色能增删改；
+// 财务能看（GET 下发）但不能改；业务员既看不到也改不了（见 GET /api/data 和这里没有 sales/finance 条目）。
+ROLE_PERMS.boss.car_staff   = { add: true, edit: true, del: true };
+ROLE_PERMS.boss.car_payroll = { add: true, edit: true, del: true };
 // sales 通过 'business_repay' 能新增的财务记录分类白名单；除"收购车辆销售利润"外，
 // 其余几类都必须带 loanId（见 checkKeyPermission）。
 const SALES_ALLOWED_FINANCE_CATEGORIES = ['收购车辆销售利润', '利息收入', '本金回收', '滞纳金'];
@@ -523,7 +527,8 @@ async function maybeAutoSnapshot(user, current, reason, force) {
     list.unshift({
       id: 'S' + Date.now().toString(36), ts: Date.now(), time: new Date().toISOString(),
       by: (user && (user.displayName || user.username)) || '', reason: reason,
-      loanCount: loans.length, financeCount: finance.length, car_loans: loans, car_finance: finance
+      loanCount: loans.length, financeCount: finance.length, car_loans: loans, car_finance: finance,
+      car_staff: Array.isArray(current.car_staff) ? current.car_staff : [], car_payroll: Array.isArray(current.car_payroll) ? current.car_payroll : []
     });
     if (list.length > AUTOSNAP_MAX) list.length = AUTOSNAP_MAX;
     const { error } = await supabase.from('pawndata').upsert([{ key: AUTOSNAP_KEY, value: list }], { onConflict: 'key' });
@@ -543,6 +548,15 @@ function summarizeFinanceRecord(r) {
   if (!r) return '';
   return (r.category || '') + ' $' + (r.amount != null ? r.amount : 0) + (r.loanId ? '（关联' + r.loanId + '）' : '');
 }
+function summarizeStaffRecord(r) {
+  if (!r) return '';
+  return '员工 ' + (r.name || '') + ' · ' + (r.dept || '') + ' · 底薪$' + (r.baseSalary != null ? r.baseSalary : 0) + ' · ' + (r.status || '');
+}
+function summarizePayrollRecord(r) {
+  if (!r) return '';
+  return (r.month || '') + ' 工资 ' + (r.name || '') + ' · 实发$' + (r.total != null ? r.total : 0) + ' · ' + (r.status === 'paid' ? '已发放' : '待发放');
+}
+const SUMMARIZERS = { car_loans: summarizeLoanRecord, car_finance: summarizeFinanceRecord, car_staff: summarizeStaffRecord, car_payroll: summarizePayrollRecord };
 // 账号管理动作（新增/改角色改状态/重置密码/删除账号）单独记一笔日志——这些操作全都
 // 只有老板能做，但老板账号可能不止一个，日志能看出"是哪个老板账号做的"
 async function logAccountChange(user, action, targetDisplay, summary) {
@@ -563,7 +577,7 @@ function loanIdentityChanged(oldRec, newRec) {
   return !!(oldRec && newRec && (oldRec.name !== newRec.name || oldRec.plate !== newRec.plate));
 }
 function logDataChanges(user, key, added, edited, removed, before) {
-  const summarize = key === 'car_loans' ? summarizeLoanRecord : summarizeFinanceRecord;
+  const summarize = SUMMARIZERS[key] || summarizeFinanceRecord;
   const now = new Date().toISOString();
   const entries = [];
   (added || []).forEach(r => entries.push({ id: genOpId(), time: now, username: user.username, displayName: user.displayName, role: user.role, dataKey: key, action: 'add', targetId: r.id, summary: summarize(r) }));
@@ -587,13 +601,15 @@ function getInitData() {
   return {
     car_loans: [],
     car_finance: [],
-    car_nextId: 1
+    car_nextId: 1,
+    car_staff: [],
+    car_payroll: []
   };
 }
 
 async function loadData() {
   const { data, error } = await supabase.from('pawndata').select('key, value')
-    .in('key', ['car_loans', 'car_finance', 'car_nextId']);
+    .in('key', ['car_loans', 'car_finance', 'car_nextId', 'car_staff', 'car_payroll']);
   if (error) throw new Error('DB_READ_ERROR: ' + error.message);
   const result = {};
   if (data) data.forEach(row => { result[row.key] = row.value; });
@@ -628,8 +644,13 @@ app.get('/api/data', auth, async (req, res) => {
       })
       .filter(x => x.period > 0);
     data.car_finance_periods = loanPeriods;
+    if (!Array.isArray(data.car_staff)) data.car_staff = [];
+    if (!Array.isArray(data.car_payroll)) data.car_payroll = [];
     if (req.user.role === 'sales') {
       data.car_finance = []; // 业务员看不到具体金额/分类这些财务明细，上面car_finance_periods已经单独发了
+    }
+    if (req.user.role !== 'boss' && req.user.role !== 'finance') {
+      data.car_staff = []; data.car_payroll = []; // 员工档案/工资表：只有老板和财务（只读）能看，业务员一条都拿不到
     }
     res.json(data);
   } catch(e) {
@@ -641,12 +662,12 @@ app.get('/api/data', auth, async (req, res) => {
 app.post('/api/data', auth, async (req, res) => {
   try {
     const body = req.body;
-    const allowed = ['car_loans', 'car_finance', 'car_nextId'];
+    const allowed = ['car_loans', 'car_finance', 'car_nextId', 'car_staff', 'car_payroll'];
     const keys = Object.keys(body).filter(k => allowed.includes(k));
     if (keys.length === 0) return res.json({ ok: true });
 
     let current = null;
-    if (keys.includes('car_loans') || keys.includes('car_finance')) {
+    if (keys.includes('car_loans') || keys.includes('car_finance') || keys.includes('car_staff') || keys.includes('car_payroll')) {
       current = await loadData();
     }
     // 2026-10-05 新增"删除必须明说"：客户端提交时要在 _intendedRemovals 里列出"这次我是
@@ -690,7 +711,7 @@ app.post('/api/data', auth, async (req, res) => {
       }
       // 2026-10-14 编号不许重复：保存结果里如果出现"库里原本没有的重复编号"，直接拒绝。
       // （库里已经存在的历史重复编号先放行，让管理员能用"修复重复编号"工具修好；工具只会减少重复。）
-      if (key === 'car_loans' || key === 'car_finance') {
+      if (key === 'car_loans' || key === 'car_finance' || key === 'car_staff' || key === 'car_payroll') {
         const dupOf = arr => { const seen = new Set(), dup = new Set(); (Array.isArray(arr) ? arr : []).forEach(x => { if (x && x.id != null) { if (seen.has(x.id)) dup.add(x.id); else seen.add(x.id); } }); return dup; };
         const newDup = dupOf(check.mergedValue);
         if (newDup.size > 0) {
@@ -797,7 +818,7 @@ app.get('/api/autosnap/:id', auth, async (req, res) => {
     const list = await loadAutosnaps();
     const snap = list.find(x => x.id === req.params.id);
     if (!snap) return res.status(404).json({ error: 'NOT_FOUND', message: '快照不存在' });
-    res.json({ car_loans: snap.car_loans, car_finance: snap.car_finance });
+    res.json({ car_loans: snap.car_loans, car_finance: snap.car_finance, car_staff: snap.car_staff || [], car_payroll: snap.car_payroll || [] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -918,6 +939,49 @@ const DATA_MIGRATIONS = [{
     notes.push({ id: rec.id, summary: '找回丢失的合同：' + summarizeLoanRecord(rec) + ' ｜ 状态：' + (rec.status === 'closed' ? '已结清（本金已全部收回）' : '还款中') });
     return true;
   }
+}, {
+  // 2026-10-18：导入老板给的《汽车2部 工资表 2026年9月》——8名员工，出勤 8.6666 天（9月下旬开始），
+  // 已发放，计入 9月支出（日期 2026-09-30）。财务里记一笔"工资支出"= 8 人实发合计。
+  // 幂等：只要系统里已经有 2026-09 的工资表就不会再导入。
+  id: '20261018-import-payroll-2026-09',
+  describe: '导入汽车2部 2026年9月工资表（8人），已发放，计入9月支出',
+  applyAll(d, notes) {
+    const MONTH = '2026-09', PAID = '2026-09-30';
+    if (d.car_payroll.some(r => r.month === MONTH)) return [];
+    const SRC = [{"seq": 1, "name": "HAI MENGSORNG", "nickname": "HAI MENGSORNG", "dept": "汽车2部", "status": "在职", "base": 650, "days": 8.6666, "leave": 0, "daily": 25, "attPay": 216.67, "meal": 0, "bonus": 0, "advance": 0, "deduction": 0, "net": 216.67, "commission": 0, "total": 216.67, "note": ""}, {"seq": 2, "name": "LIMENG", "nickname": "LIMENG", "dept": "汽车2部", "status": "在职", "base": 630, "days": 8.6666, "leave": 0, "daily": 24.23, "attPay": 210, "meal": 0, "bonus": 0, "advance": 0, "deduction": 0, "net": 210, "commission": 0, "total": 210, "note": ""}, {"seq": 3, "name": "RATANAK", "nickname": "RATANAK", "dept": "汽车2部", "status": "在职", "base": 350, "days": 8.6666, "leave": 0, "daily": 13.46, "attPay": 116.67, "meal": 0, "bonus": 0, "advance": 0, "deduction": 0, "net": 116.67, "commission": 0, "total": 116.67, "note": ""}, {"seq": 4, "name": "CAI XING", "nickname": "CAI XING", "dept": "汽车2部", "status": "在职", "base": 700, "days": 8.6666, "leave": 0, "daily": 26.92, "attPay": 233.33, "meal": 0, "bonus": 0, "advance": 0, "deduction": 0, "net": 233.33, "commission": 0, "total": 233.33, "note": ""}, {"seq": 5, "name": "宋喆", "nickname": "宋喆", "dept": "汽车2部", "status": "在职", "base": 1500, "days": 8.6666, "leave": 0, "daily": 57.69, "attPay": 500, "meal": 0, "bonus": 0, "advance": 0, "deduction": 0, "net": 500, "commission": 0, "total": 500, "note": ""}, {"seq": 6, "name": "公司保安", "nickname": "公司保安", "dept": "汽车2部", "status": "在职", "base": 250, "days": 8.6666, "leave": 0, "daily": 9.62, "attPay": 83.33, "meal": 0, "bonus": 0, "advance": 0, "deduction": 0, "net": 83.33, "commission": 0, "total": 83.33, "note": ""}, {"seq": 7, "name": "車庫保安", "nickname": "車庫保安", "dept": "汽车2部", "status": "在职", "base": 250, "days": 8.6666, "leave": 0, "daily": 9.62, "attPay": 83.33, "meal": 0, "bonus": 0, "advance": 0, "deduction": 0, "net": 83.33, "commission": 0, "total": 83.33, "note": ""}, {"seq": 8, "name": "清潔阿姨", "nickname": "清潔阿姨", "dept": "汽车2部", "status": "在职", "base": 270, "days": 8.6666, "leave": 0, "daily": 10.38, "attPay": 90, "meal": 0, "bonus": 0, "advance": 0, "deduction": 0, "net": 90, "commission": 0, "total": 90, "note": ""}];
+    const r2 = x => Math.round((Number(x) + 1e-9) * 100) / 100;
+    let maxNo = 0;
+    d.car_staff.forEach(x => { const k = parseInt(String(x.id || '').replace(/\D/g, '')) || 0; if (k > maxNo) maxNo = k; });
+    const staffByName = {};
+    d.car_staff.forEach(x => { staffByName[x.name] = x; });
+    const newPayroll = [];
+    SRC.forEach(x => {
+      let st = staffByName[x.name];
+      if (!st) {
+        maxNo++;
+        st = { id: 'ST' + String(maxNo).padStart(3, '0'), name: x.name, nickname: x.nickname || '', dept: x.dept || '', status: x.status || '在职', baseSalary: x.base, joinDate: '', phone: '', note: '', createdAt: new Date().toISOString() };
+        d.car_staff.push(st); staffByName[x.name] = st;
+        notes.push({ key: 'car_staff', id: st.id, summary: '导入员工档案：' + summarizeStaffRecord(st) });
+      }
+      newPayroll.push({
+        id: 'PR' + MONTH.replace('-', '') + '_' + st.id, month: MONTH, staffId: st.id, name: x.name, nickname: x.nickname || '', dept: x.dept || '',
+        base: x.base, days: x.days, leave: x.leave || 0, daily: x.daily, attendancePay: x.attPay, meal: x.meal || 0, bonus: x.bonus || 0,
+        advance: x.advance || 0, deduction: x.deduction || 0, net: x.net, commission: x.commission || 0, total: x.total, note: x.note || '',
+        status: 'paid', paidDate: PAID, financeId: 'FPAY_' + MONTH, createdAt: new Date().toISOString()
+      });
+    });
+    const sum = r2(newPayroll.reduce((a, x) => a + x.total, 0));
+    d.car_payroll = newPayroll.concat(d.car_payroll);
+    newPayroll.forEach(x => notes.push({ key: 'car_payroll', id: x.id, summary: '导入工资表：' + summarizePayrollRecord(x) }));
+    const fid = 'FPAY_' + MONTH;
+    if (!d.car_finance.some(r => r.id === fid)) {
+      const fr = { id: fid, type: 'expense', category: '工资支出', amount: sum, date: PAID, loanId: '', payrollMonth: MONTH,
+        note: '2026年9月 员工工资（' + newPayroll.length + '人）· 汽车2部 · 由工资表自动入账' };
+      d.car_finance.unshift(fr);
+      notes.push({ key: 'car_finance', id: fid, summary: '工资表入账：' + summarizeFinanceRecord(fr) + ' ｜ ' + fr.note });
+    }
+    return ['car_staff', 'car_payroll', 'car_finance'];
+  }
 }];
 async function runDataMigrations() {
   try {
@@ -928,22 +992,37 @@ async function runDataMigrations() {
     if (pending.length === 0) return;
     let current = await loadData();
     if (!Array.isArray(current.car_loans) || !Array.isArray(current.car_finance)) throw new Error('数据格式异常，跳过自动修正');
+    ['car_staff', 'car_payroll'].forEach(k => { if (!Array.isArray(current[k])) current[k] = []; });
     const sysUser = { username: 'system', displayName: '系统数据修正', role: 'boss' };
+    const KEYS = ['car_loans', 'car_finance', 'car_staff', 'car_payroll'];
     for (const m of pending) {
-      const loans = JSON.parse(JSON.stringify(current.car_loans));
-      const fin = JSON.parse(JSON.stringify(current.car_finance));
+      const d = {};
+      KEYS.forEach(k => { d[k] = JSON.parse(JSON.stringify(current[k])); });
       const notes = [];
-      const changed = m.apply(loans, fin, notes);
-      if (changed) {
-        if (loans.length - current.car_loans.length !== (m.expectAdd || 0) || fin.length !== current.car_finance.length) throw new Error('修正会改变记录条数，已中止：' + m.id);
+      let changedKeys = [];
+      if (m.applyAll) {
+        changedKeys = m.applyAll(d, notes) || [];
+        // 安全检查：自动修正只能"改/加"，不许让任何一条原有记录消失
+        KEYS.forEach(k => {
+          const ids = new Set(d[k].map(x => x.id));
+          if (current[k].some(x => !ids.has(x.id))) throw new Error('修正会让 ' + k + ' 里的记录消失，已中止：' + m.id);
+        });
+      } else {
+        const changed = m.apply(d.car_loans, d.car_finance, notes);
+        if (changed) {
+          if (d.car_loans.length - current.car_loans.length !== (m.expectAdd || 0) || d.car_finance.length !== current.car_finance.length) throw new Error('修正会改变记录条数，已中止：' + m.id);
+          changedKeys = ['car_loans'];
+        }
+      }
+      if (changedKeys.length > 0) {
         await maybeAutoSnapshot(sysUser, current, '自动数据修正前', true);
-        const { error } = await supabase.from('pawndata').upsert([{ key: 'car_loans', value: loans }], { onConflict: 'key' });
+        const { error } = await supabase.from('pawndata').upsert(changedKeys.map(k => ({ key: k, value: d[k] })), { onConflict: 'key' });
         if (error) throw new Error('写入失败：' + error.message);
         const now = new Date().toISOString();
-        OPLOG = notes.map(n => ({ id: genOpId(), time: now, username: sysUser.username, displayName: sysUser.displayName, role: 'boss', dataKey: 'car_loans', action: 'edit', targetId: n.id, summary: n.summary })).concat(OPLOG);
+        OPLOG = notes.map(n => ({ id: genOpId(), time: now, username: sysUser.username, displayName: sysUser.displayName, role: 'boss', dataKey: n.key || 'car_loans', action: n.action || 'edit', targetId: n.id, summary: n.summary })).concat(OPLOG);
         if (OPLOG.length > OPLOG_MAX) OPLOG = OPLOG.slice(0, OPLOG_MAX);
         await persistOplog();
-        current = Object.assign({}, current, { car_loans: loans });
+        changedKeys.forEach(k => { current[k] = d[k]; });
         console.log('  数据修正已执行：' + m.id + '（' + notes.length + ' 项）');
       } else {
         console.log('  数据修正无需执行（数据已是正确状态或条件不符）：' + m.id);
