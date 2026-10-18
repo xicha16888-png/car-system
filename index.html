@@ -227,6 +227,8 @@ html,body{overflow:auto;height:auto}
   <div class="mob-more-item" onclick="closeMobMore();nav('finance_cashflow')"><span class="mmi">💰</span>现金流</div>
   <div class="mob-more-item" onclick="closeMobMore();nav('finance_income')"><span class="mmi">💵</span>收入登记</div>
   <div class="mob-more-item" onclick="closeMobMore();nav('finance_expense')"><span class="mmi">💸</span>支出登记</div>
+  <div class="mob-more-item" onclick="closeMobMore();nav('daily_expense')"><span class="mmi">🛒</span>日常开支</div>
+  <div class="mob-more-item" onclick="closeMobMore();nav('payroll')"><span class="mmi">👷</span>员工工资</div>
   <div class="mob-divider"></div>
   <div class="mob-more-item" onclick="closeMobMore();nav('import')"><span class="mmi">📥</span>批量导入</div>
   <div class="mob-more-item" onclick="closeMobMore();nav('user_manage')"><span class="mmi">👥</span>账号管理</div>
@@ -249,14 +251,14 @@ html,body{overflow:auto;height:auto}
 
 // ══ 版本号：老板每次改完系统、贴到GitHub部署新版之后，把这个数字改一下 ══
 // （改哪一位都行，只要跟上一个版本不一样，业务员浏览器就能感知到"有新版本"）
-var APP_VERSION = "20261014e";
+var APP_VERSION = "20261018a";
 var _pendingUpdate = false;   // 已经检测到线上有新版本，还没刷新
 var _updateSnoozed = false;   // 业务员点了"稍后"，先别再弹倒计时打扰他
 // 只在这些"纯浏览/看报表"页面允许直接自动刷新——凡是可能正在填表/登记的页面
 // （新增贷款/回款登记/收支登记/批量导入/收购车辆/结算/账号管理等）一律不打扰，
 // 等业务员自己点导航离开那个页面时，再顺手刷新，绝不会打断他正在填的东西。
 var SAFE_NAV_PAGES = ["home","list","finance_pnl","finance_cashflow","overdue",
-  "haircut_detail","interest_detail","profit_detail","middleman_detail","acquired_list","data_check","oplog","snapshots"];
+  "haircut_detail","interest_detail","profit_detail","middleman_detail","acquired_list","data_check","oplog","snapshots","daily_expense","payroll"];
 
 // ══ 后端API配置（Key藏在服务器，前端看不到）══
 var _loans = [];
@@ -671,6 +673,572 @@ async function applyDupFix() {
   renderDupFix();
 }
 
+// ══ 员工工资 & 日常开支 ══ 2026-10-18 新增
+// 设计：
+//  · 员工档案(car_staff) + 月度工资表(car_payroll)：每人每月一行，列跟老板的工资表Excel一致——基本工资/出勤天数/
+//    请假/日薪/出勤工资/餐补/奖金/预支/扣款/实领工资/提成/实发总计/备注。日薪 = 基本工资÷26，出勤工资 = 日薪×出勤天数，
+//    实领 = 出勤工资+餐补+奖金−预支−扣款，实发总计 = 实领+提成。
+//  · 点"确认发放"时，系统在财务里自动记【一笔】"工资支出"（编号 FPAY_年-月，金额=当月实发合计，日期=发放日期），
+//    所以利润表/现金流/日常开支会自动带上工资，不用再手动去"支出登记"里填一遍；撤销发放会把这笔一并撤掉。
+//  · 日常开支页：按月看全部支出（含工资），按分类汇总，快速登记房租/水电/餐费等；数据还是存在财务记录里。
+//  · 权限：老板账号可编辑，财务账号只读，业务员完全看不到（服务器不下发）。
+var _staff = [];
+var _payroll = [];
+var _payMonth = "";
+var _payTab = "sheet";
+var _staffFormOpen = false, _staffEditId = null;
+var _dailyMonth = "", _dailyCat = "", _dailyQ = "";
+var _dailyBusy = false, _payBusy = false;
+var DAILY_CATS = ["房租","水电网费","员工餐费","办公用品","交通油费","招待应酬","通讯费","维修保养","报销杂费","介绍费","其他日常开支"];
+var LEGACY_EXP_CATS = ["办公费用","推广费用","车辆评估费","其他支出"];
+function canEditPayroll() { return CURRENT_ROLE==="boss"; }
+function pr2(x) { var n = Number(x)||0; return Math.round((n + (n>=0?1:-1)*1e-9)*100)/100; }
+function hesc(s) { return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function pmoney(n) { return "$" + (Number(n)||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function curYM() { var d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
+function ymAdd(ym, delta) { var p = ym.split("-"); var d = new Date(parseInt(p[0],10), parseInt(p[1],10)-1+delta, 1); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
+function monthEndStr(ym) { var p = ym.split("-"); var d = new Date(parseInt(p[0],10), parseInt(p[1],10), 0); return ym+"-"+String(d.getDate()).padStart(2,"0"); }
+function todayStr() { var d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function validYMD(s) { return /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s).getTime()); }
+
+// 一行工资的计算（跟老板Excel的算法一致：日薪=基本工资/26）
+function payCalc(r) {
+  var base = Number(r.base)||0;
+  var att = pr2(base/26*(Number(r.days)||0));
+  var net = pr2(att + (Number(r.meal)||0) + (Number(r.bonus)||0) - (Number(r.advance)||0) - (Number(r.deduction)||0));
+  var total = pr2(net + (Number(r.commission)||0));
+  return { daily: pr2(base/26), attendancePay: att, net: net, total: total };
+}
+function payMonthsList() {
+  var set = {}; _payroll.forEach(function(r){ if(r.month) set[r.month] = 1; });
+  var cur = curYM(); set[cur] = 1; set[ymAdd(cur,-1)] = 1; set[ymAdd(cur,-2)] = 1;
+  return Object.keys(set).sort().reverse();
+}
+function payrollRowsOf(month) {
+  return _payroll.filter(function(r){ return r.month===month; }).sort(function(a,b){ return String(a.staffId).localeCompare(String(b.staffId)); });
+}
+function payrollMonthPaid(rows) { return rows.length>0 && rows.every(function(r){ return r.status==="paid"; }); }
+
+// ── 通用保存：一次请求里同时改多个数据表（员工档案/工资表/财务），先拉最新数据再叠加，跟 mutateData 同一套安全规则 ──
+// fns = {car_staff:fn, car_payroll:fn, car_loans:fn, car_finance:fn}；每个 fn(最新数组, ctx) 返回新数组，ctx 是已叠加好的各表最新数组。
+async function mutateKeys(fns, _retried) {
+  var ORDER = ["car_staff","car_payroll","car_loans","car_finance"];
+  var fresh;
+  try {
+    setSyncStatus("syncing");
+    var getRes = await fetch("/api/data", {headers: authHeaders()});
+    if(getRes.status===401) { setSyncStatus("error"); showLoginScreen("登录已过期，请重新登录"); return {ok:false}; }
+    fresh = await getRes.json();
+  } catch(e) { setSyncStatus("error"); alert("⚠️ 网络异常，无法获取最新数据，请检查网络后重试再保存"); return {ok:false}; }
+  var ctx = { car_loans: fresh.car_loans||[], car_finance: fresh.car_finance||[], car_staff: fresh.car_staff||[], car_payroll: fresh.car_payroll||[] };
+  var payload = {}, newIds = {}, removals = {};
+  ORDER.forEach(function(k){ newIds[k] = []; removals[k] = []; });
+  ORDER.forEach(function(k){
+    if(!fns[k]) return;
+    var beforeIds = ctx[k].map(function(x){ return x.id; });
+    ctx[k] = fns[k](ctx[k], ctx) || ctx[k];
+    payload[k] = ctx[k];
+    var afterSet = {}; ctx[k].forEach(function(x){ afterSet[x.id] = 1; });
+    newIds[k] = ctx[k].map(function(x){ return x.id; }).filter(function(id){ return beforeIds.indexOf(id)<0; });
+    removals[k] = beforeIds.filter(function(id){ return !afterSet[id]; });
+  });
+  payload._newIds = newIds; payload._intendedRemovals = removals;
+  if(_pendingSnapReason) payload._snapshotReason = _pendingSnapReason;
+  try {
+    var res = await fetch("/api/data", { method:"POST", headers:Object.assign({"Content-Type":"application/json"}, authHeaders()), body:JSON.stringify(payload) });
+    if(res.status===401) { setSyncStatus("error"); showLoginScreen("登录已过期，请重新登录"); return {ok:false}; }
+    if(res.status===403) {
+      var d = await res.json().catch(function(){return{};});
+      if(!_retried && ["无权删除记录","无权修改已有记录","无权新增记录"].indexOf(d.message)!==-1) return await mutateKeys(fns, true);
+      setSyncStatus("error"); alert("❌ 无权限："+(d.message||"操作被拒绝，请刷新页面重新加载最新数据")); return {ok:false};
+    }
+    if(res.status===409) {
+      var d409 = await res.json().catch(function(){return{};});
+      if(!_retried && (d409.error==="ID_COLLISION" || d409.error==="DUPLICATE_ID")) return await mutateKeys(fns, true);
+      setSyncStatus("error"); alert("🛡️ 已拒绝保存："+(d409.message||"检测到记录会意外消失，请刷新页面后重试")); return {ok:false};
+    }
+    if(!res.ok) { setSyncStatus("error"); return {ok:false}; }
+    setSyncStatus("ok");
+    if(fns.car_staff) _staff = ctx.car_staff;
+    if(fns.car_payroll) _payroll = ctx.car_payroll;
+    if(fns.car_finance) _financeRecords = ctx.car_finance;
+    if(fns.car_loans) _loans = ctx.car_loans;
+    return {ok:true};
+  } catch(e) { setSyncStatus("error"); return {ok:false}; }
+}
+
+// ══════════ 员工工资页 ══════════
+function renderPayroll() {
+  if(!canViewFinance()) { alert("⛔ 你的账号没有权限查看员工工资"); nav("home"); return; }
+  if(!_payMonth) {
+    var ms = _payroll.map(function(r){ return r.month; }).sort();
+    _payMonth = ms.length ? ms[ms.length-1] : ymAdd(curYM(), -1);
+  }
+  var h = '<div class="page-header"><div class="page-title">👷 员工工资</div><div class="page-sub">员工档案 + 月度工资表。确认发放后，系统自动在财务里记一笔"工资支出"，利润表/现金流/日常开支同步带上'+(canEditPayroll()?'':'（你的账号为只读）')+'</div></div>';
+  h += '<div class="search-row" style="margin-bottom:14px"><button class="btn '+(_payTab==="sheet"?'btn-primary':'btn-outline')+'" onclick="_payTab=\'sheet\';renderPayroll()">📋 月度工资表</button><button class="btn '+(_payTab==="staff"?'btn-primary':'btn-outline')+'" onclick="_payTab=\'staff\';renderPayroll()">👥 员工档案</button></div>';
+  h += (_payTab==="staff") ? payrollStaffHtml() : payrollSheetHtml();
+  document.getElementById("mainContent").innerHTML = h;
+  if(_payTab==="sheet") payRecalcAll();
+}
+
+function payNumInput(pid, f, val) {
+  return '<input class="pr_in" type="number" step="0.01" data-pid="'+pid+'" data-f="'+f+'" value="'+(val==null?0:val)+'" oninput="payRowRecalc(\''+pid+'\')" style="width:74px;padding:5px;border:1.5px solid #cfd8dc;border-radius:6px;font-size:12px">';
+}
+function payrollSheetHtml() {
+  var canEdit = canEditPayroll();
+  var rows = payrollRowsOf(_payMonth);
+  var paid = payrollMonthPaid(rows);
+  var h = '<div class="search-row"><select id="payMonthSel" onchange="_payMonth=this.value;renderPayroll()">';
+  payMonthsList().forEach(function(m){ h += '<option value="'+m+'"'+(m===_payMonth?' selected':'')+'>'+m+'</option>'; });
+  h += '</select>';
+  if(canEdit) h += '<label class="btn btn-outline" style="cursor:pointer;margin:0">📥 导入工资表Excel<input type="file" accept=".xlsx" style="display:none" onchange="onPayrollFile(this)"></label>';
+  h += '</div>';
+  if(rows.length===0) {
+    h += '<div class="card" style="text-align:center;padding:30px;color:var(--muted)">'+_payMonth+' 还没有工资表'+(canEdit?'<div style="margin-top:14px"><button class="btn btn-primary" onclick="genPayrollSheet()">📋 按在职员工生成 '+_payMonth+' 工资表</button></div><div style="font-size:12px;margin-top:8px">生成后出勤天数默认按满勤26天，请改成实际出勤；也可以点上面"导入工资表Excel"直接导入</div>':'')+'</div>';
+    // 历史月份一览
+    h += payrollHistoryHtml();
+    return h;
+  }
+  var paidRow = rows.find(function(r){ return r.status==="paid"; });
+  h += '<div class="stats-grid" style="margin-bottom:14px">';
+  h += '<div class="stat-card blue"><div class="stat-label">人数</div><div class="stat-value">'+rows.length+'</div></div>';
+  h += '<div class="stat-card red"><div class="stat-label">实发总计</div><div class="stat-value" id="prSumTotal">—</div></div>';
+  h += '<div class="stat-card '+(paid?'green':'amber')+'"><div class="stat-label">状态</div><div class="stat-value" style="font-size:16px">'+(paid?('已发放 · '+(paidRow&&paidRow.paidDate||'')):'待发放')+'</div><div class="stat-sub">'+(paid?'已计入财务支出':'未计入财务，确认发放后入账')+'</div></div>';
+  h += '</div>';
+  h += '<div class="card"><div class="card-title" style="margin-bottom:10px">📋 '+_payMonth+' 工资表</div><div class="table-wrap"><table><thead><tr><th>序号</th><th>姓名</th><th>部门/职位</th><th>基本工资</th><th>出勤天数</th><th>请假天数</th><th>日薪</th><th>出勤工资</th><th>餐补</th><th>奖金</th><th>预支</th><th>扣款</th><th>实领工资</th><th>提成</th><th>实发总计</th><th>备注</th>'+(canEdit&&!paid?'<th></th>':'')+'</tr></thead><tbody>';
+  rows.forEach(function(r, i){
+    var pid = r.id;
+    h += '<tr data-pid="'+pid+'"><td>'+(i+1)+'</td><td style="font-weight:600">'+hesc(r.name)+'</td><td style="font-size:12px">'+hesc(r.dept||"")+'</td><td>'+pmoney(r.base)+'</td>';
+    if(canEdit) {
+      h += '<td>'+payNumInput(pid,'days',r.days)+'</td><td>'+payNumInput(pid,'leave',r.leave)+'</td>';
+    } else { h += '<td>'+r.days+'</td><td>'+(r.leave||0)+'</td>'; }
+    h += '<td id="pr_daily_'+pid+'">—</td><td id="pr_att_'+pid+'">—</td>';
+    if(canEdit) { h += '<td>'+payNumInput(pid,'meal',r.meal)+'</td><td>'+payNumInput(pid,'bonus',r.bonus)+'</td><td>'+payNumInput(pid,'advance',r.advance)+'</td><td>'+payNumInput(pid,'deduction',r.deduction)+'</td>'; }
+    else { h += '<td>'+pmoney(r.meal)+'</td><td>'+pmoney(r.bonus)+'</td><td>'+pmoney(r.advance)+'</td><td>'+pmoney(r.deduction)+'</td>'; }
+    h += '<td id="pr_net_'+pid+'" style="font-weight:600">—</td>';
+    h += canEdit ? '<td>'+payNumInput(pid,'commission',r.commission)+'</td>' : '<td>'+pmoney(r.commission)+'</td>';
+    h += '<td id="pr_total_'+pid+'" style="font-weight:700;color:#c62828">—</td>';
+    h += canEdit ? '<td><input class="pr_in" type="text" data-pid="'+pid+'" data-f="note" value="'+hesc(r.note||"")+'" style="width:110px;padding:5px;border:1.5px solid #cfd8dc;border-radius:6px;font-size:12px"></td>' : '<td style="font-size:12px;color:var(--muted)">'+hesc(r.note||"")+'</td>';
+    if(canEdit&&!paid) h += '<td><button class="btn btn-sm btn-danger" onclick="deletePayrollRow(\''+pid+'\')">删</button></td>';
+    h += '</tr>';
+  });
+  h += '<tr style="background:#fafafa;font-weight:700"><td colspan="3">合计</td><td id="prT_base">—</td><td></td><td></td><td></td><td id="prT_att">—</td><td id="prT_meal">—</td><td id="prT_bonus">—</td><td id="prT_adv">—</td><td id="prT_ded">—</td><td id="prT_net">—</td><td id="prT_comm">—</td><td id="prT_total" style="color:#c62828">—</td><td></td>'+(canEdit&&!paid?'<td></td>':'')+'</tr>';
+  h += '</tbody></table></div>';
+  h += '<div style="font-size:11px;color:var(--muted);margin-top:8px">日薪 = 基本工资 ÷ 26；出勤工资 = 日薪 × 出勤天数；实领 = 出勤工资 + 餐补 + 奖金 − 预支 − 扣款；实发总计 = 实领 + 提成</div>';
+  if(canEdit) {
+    var missing = _staff.filter(function(s){ return s.status==="在职" && !rows.some(function(r){ return r.staffId===s.id; }); });
+    h += '<div class="btn-row"><button class="btn btn-primary" id="payBtnSave" onclick="savePayrollSheet(false)">💾 保存修改</button>';
+    if(!paid) h += '<button class="btn btn-success" onclick="savePayrollSheet(true)">✅ 确认发放（计入财务支出）</button>';
+    else h += '<button class="btn btn-outline" onclick="undoPayrollPaid()">↩️ 撤销发放</button>';
+    h += '<button class="btn btn-outline" onclick="exportPayrollCsv()">📥 导出Excel(CSV)</button></div>';
+    if(missing.length) {
+      h += '<div class="search-row" style="margin-top:12px"><select id="payAddStaff">'+missing.map(function(s){ return '<option value="'+s.id+'">'+hesc(s.name)+'</option>'; }).join('')+'</select><button class="btn btn-outline" onclick="addStaffToSheet()">➕ 补加到本月工资表</button></div>';
+    }
+    if(paid) h += '<div style="font-size:12px;color:#546e7a;margin-top:8px">已发放的工资表也可以改，保存后会同步更新财务里的这笔工资支出金额。</div>';
+  } else {
+    h += '<div class="btn-row"><button class="btn btn-outline" onclick="exportPayrollCsv()">📥 导出Excel(CSV)</button></div>';
+  }
+  h += '</div>';
+  h += payrollHistoryHtml();
+  return h;
+}
+function payrollHistoryHtml() {
+  var months = {}; _payroll.forEach(function(r){ var m = months[r.month] || (months[r.month] = {n:0,total:0,paid:0}); m.n++; m.total = pr2(m.total + (r.total||0)); if(r.status==="paid") m.paid++; });
+  var keys = Object.keys(months).sort().reverse();
+  if(!keys.length) return "";
+  var h = '<div class="card"><div class="card-title" style="margin-bottom:10px">🗂 历史工资表</div><div class="table-wrap"><table><thead><tr><th>月份</th><th>人数</th><th>实发总计</th><th>状态</th><th></th></tr></thead><tbody>';
+  keys.forEach(function(k){ var m = months[k]; h += '<tr><td style="font-weight:600">'+k+'</td><td>'+m.n+'</td><td style="font-weight:600">'+pmoney(m.total)+'</td><td>'+(m.paid===m.n?'<span class="badge badge-green">已发放</span>':'<span class="badge badge-amber">待发放</span>')+'</td><td><button class="btn btn-sm btn-outline" onclick="_payMonth=\''+k+'\';_payTab=\'sheet\';renderPayroll()">查看</button></td></tr>'; });
+  return h + '</tbody></table></div></div>';
+}
+// 读取页面上某一行当前填的值，算出结果
+function payReadRow(pid) {
+  var rec = _payroll.find(function(r){ return r.id===pid; }); if(!rec) return null;
+  var out = { base: rec.base };
+  ["days","leave","meal","bonus","advance","deduction","commission"].forEach(function(f){
+    var el = document.querySelector('.pr_in[data-pid="'+pid+'"][data-f="'+f+'"]');
+    out[f] = el ? (parseFloat(el.value)||0) : (rec[f]||0);
+  });
+  var noteEl = document.querySelector('.pr_in[data-pid="'+pid+'"][data-f="note"]');
+  out.note = noteEl ? noteEl.value.trim() : (rec.note||"");
+  var c = payCalc(out); out.daily = c.daily; out.attendancePay = c.attendancePay; out.net = c.net; out.total = c.total;
+  return out;
+}
+function payRowRecalc(pid) {
+  var o = payReadRow(pid); if(!o) return;
+  var set = function(id, v){ var el = document.getElementById(id); if(el) el.textContent = pmoney(v); };
+  set("pr_daily_"+pid, o.daily); set("pr_att_"+pid, o.attendancePay); set("pr_net_"+pid, o.net); set("pr_total_"+pid, o.total);
+  payRecalcTotals();
+}
+function payRecalcAll() { payrollRowsOf(_payMonth).forEach(function(r){ payRowRecalc(r.id); }); payRecalcTotals(); }
+function payRecalcTotals() {
+  var t = {base:0,att:0,meal:0,bonus:0,adv:0,ded:0,net:0,comm:0,total:0};
+  payrollRowsOf(_payMonth).forEach(function(r){
+    var o = payReadRow(r.id); if(!o) return;
+    t.base += o.base; t.att += o.attendancePay; t.meal += o.meal; t.bonus += o.bonus; t.adv += o.advance; t.ded += o.deduction; t.net += o.net; t.comm += o.commission; t.total += o.total;
+  });
+  var set = function(id, v){ var el = document.getElementById(id); if(el) el.textContent = pmoney(pr2(v)); };
+  set("prT_base",t.base); set("prT_att",t.att); set("prT_meal",t.meal); set("prT_bonus",t.bonus); set("prT_adv",t.adv); set("prT_ded",t.ded); set("prT_net",t.net); set("prT_comm",t.comm); set("prT_total",t.total); set("prSumTotal",t.total);
+}
+function payEditsFromPage(rows) {
+  var edits = {};
+  rows.forEach(function(r){ var o = payReadRow(r.id); if(o) edits[r.id] = o; });
+  return edits;
+}
+// 把页面上的修改叠加到最新工资表数组上
+function applyPayrollEdits(arr, edits) {
+  arr.forEach(function(r){
+    var o = edits[r.id]; if(!o) return;
+    ["days","leave","meal","bonus","advance","deduction","commission","note","daily","attendancePay","net","total"].forEach(function(f){ r[f] = o[f]; });
+  });
+  return arr;
+}
+// 当月工资 → 财务里那一笔"工资支出"
+function payrollFinanceRec(month, payArr, paidDate) {
+  var rows = payArr.filter(function(r){ return r.month===month; });
+  var sum = pr2(rows.reduce(function(a,r){ return a + (r.total||0); }, 0));
+  var y = month.split("-");
+  return { id:"FPAY_"+month, type:"expense", category:"工资支出", amount:sum, date:paidDate, loanId:"", payrollMonth:month,
+    note:y[0]+"年"+parseInt(y[1],10)+"月 员工工资（"+rows.length+"人）· 由工资表自动入账" };
+}
+async function genPayrollSheet() {
+  if(!canEditPayroll()) return;
+  var month = _payMonth;
+  var active = _staff.filter(function(s){ return s.status==="在职"; });
+  if(!active.length) { alert("还没有在职员工，请先到「员工档案」里添加"); return; }
+  if(!confirm("按 "+active.length+" 名在职员工生成 "+month+" 工资表？\n出勤天数默认满勤26天，生成后请改成实际出勤。")) return;
+  var res = await mutateKeys({ car_payroll: function(arr){
+    var have = {}; arr.forEach(function(r){ have[r.id] = 1; });
+    active.forEach(function(s){
+      var id = "PR"+month.replace("-","")+"_"+s.id; if(have[id]) return;
+      var rec = { id:id, month:month, staffId:s.id, name:s.name, nickname:s.nickname||"", dept:s.dept||"", base:s.baseSalary||0, days:26, leave:0, meal:0, bonus:0, advance:0, deduction:0, commission:0, note:"", status:"unpaid", createdAt:new Date().toISOString() };
+      var c = payCalc(rec); rec.daily = c.daily; rec.attendancePay = c.attendancePay; rec.net = c.net; rec.total = c.total;
+      arr.unshift(rec);
+    });
+    return arr;
+  }});
+  if(!res.ok) { alert("⚠️ 生成失败，数据没有被改动，请刷新后重试"); return; }
+  renderPayroll();
+}
+async function addStaffToSheet() {
+  var sid = document.getElementById("payAddStaff") && document.getElementById("payAddStaff").value; if(!sid) return;
+  var s = _staff.find(function(x){ return x.id===sid; }); if(!s) return;
+  var month = _payMonth;
+  var res = await mutateKeys({ car_payroll: function(arr){
+    var id = "PR"+month.replace("-","")+"_"+s.id; if(arr.some(function(r){ return r.id===id; })) return arr;
+    var rec = { id:id, month:month, staffId:s.id, name:s.name, nickname:s.nickname||"", dept:s.dept||"", base:s.baseSalary||0, days:26, leave:0, meal:0, bonus:0, advance:0, deduction:0, commission:0, note:"", status:(payrollMonthPaid(arr.filter(function(r){return r.month===month;}))?"paid":"unpaid"), createdAt:new Date().toISOString() };
+    var c = payCalc(rec); rec.daily = c.daily; rec.attendancePay = c.attendancePay; rec.net = c.net; rec.total = c.total;
+    var any = arr.find(function(r){ return r.month===month && r.status==="paid"; });
+    if(any) { rec.paidDate = any.paidDate; rec.financeId = any.financeId; }
+    arr.unshift(rec); return arr;
+  }, car_finance: function(fin, ctx){
+    var ex = fin.find(function(r){ return r.id==="FPAY_"+month; });
+    if(!ex) return fin;
+    var nr = payrollFinanceRec(month, ctx.car_payroll, ex.date);
+    return fin.map(function(r){ return r.id===nr.id ? Object.assign({}, r, {amount:nr.amount, note:nr.note}) : r; });
+  }});
+  if(!res.ok) { alert("⚠️ 保存失败，请刷新后重试"); return; }
+  renderPayroll();
+}
+async function savePayrollSheet(confirmPaid) {
+  if(!canEditPayroll() || _payBusy) return;
+  var month = _payMonth, rows = payrollRowsOf(month);
+  if(!rows.length) return;
+  var edits = payEditsFromPage(rows);
+  var paid = payrollMonthPaid(rows);
+  var paidDate = "";
+  if(confirmPaid) {
+    var total = pr2(rows.reduce(function(a,r){ return a + (edits[r.id]?edits[r.id].total:(r.total||0)); }, 0));
+    var def = (month < curYM()) ? monthEndStr(month) : todayStr();
+    paidDate = prompt("确认发放 "+month+" 工资（"+rows.length+"人，实发合计 "+pmoney(total)+"）\n请输入发放日期（YYYY-MM-DD），财务支出会记在这一天：", def);
+    if(paidDate===null) return;
+    paidDate = paidDate.trim();
+    if(!validYMD(paidDate)) { alert("日期格式不对，请按 2026-09-30 这样填"); return; }
+    if(!confirm("确认发放？\n"+month+" 工资 "+rows.length+" 人，合计 "+pmoney(total)+"\n将在财务里记一笔「工资支出」，日期 "+paidDate+"。")) return;
+  }
+  _payBusy = true;
+  try {
+    var fns = { car_payroll: function(arr){
+      applyPayrollEdits(arr, edits);
+      if(confirmPaid) arr.forEach(function(r){ if(r.month===month){ r.status = "paid"; r.paidDate = paidDate; r.financeId = "FPAY_"+month; } });
+      return arr;
+    }};
+    if(confirmPaid || paid) {
+      fns.car_finance = function(fin, ctx){
+        var ex = fin.find(function(r){ return r.id==="FPAY_"+month; });
+        var nr = payrollFinanceRec(month, ctx.car_payroll, confirmPaid ? paidDate : (ex ? ex.date : monthEndStr(month)));
+        if(ex) return fin.map(function(r){ return r.id===nr.id ? Object.assign({}, r, {amount:nr.amount, note:nr.note, date:nr.date}) : r; });
+        fin.unshift(nr); return fin;
+      };
+    }
+    var res = await mutateKeys(fns);
+    if(!res.ok) { alert("⚠️ 保存失败，数据没有被改动，请刷新页面后重试"); return; }
+    alert(confirmPaid ? "✅ 已确认发放，财务里已记入一笔工资支出" : "✅ 已保存");
+    renderPayroll();
+  } finally { _payBusy = false; }
+}
+async function undoPayrollPaid() {
+  if(!canEditPayroll()) return;
+  var month = _payMonth;
+  if(!confirm("撤销 "+month+" 的发放？\n财务里对应的那笔「工资支出」会一并撤掉，工资表回到待发放。")) return;
+  if(!requireDeletePassword("撤销 "+month+" 工资发放（并删除对应的财务支出记录）")) return;
+  _pendingSnapReason = "撤销工资发放前";
+  try {
+    var res = await mutateKeys({
+      car_payroll: function(arr){ arr.forEach(function(r){ if(r.month===month){ r.status = "unpaid"; delete r.paidDate; delete r.financeId; } }); return arr; },
+      car_finance: function(fin){ return fin.filter(function(r){ return r.id !== "FPAY_"+month; }); }
+    });
+    if(!res.ok) { alert("⚠️ 撤销失败，数据没有被改动"); return; }
+    alert("✅ 已撤销发放");
+    renderPayroll();
+  } finally { _pendingSnapReason = ""; }
+}
+async function deletePayrollRow(pid) {
+  if(!canEditPayroll()) return;
+  var rec = _payroll.find(function(r){ return r.id===pid; }); if(!rec) return;
+  if(!requireDeletePassword("从 "+rec.month+" 工资表里删除 "+rec.name+" 这一行")) return;
+  var res = await mutateKeys({ car_payroll: function(arr){ return arr.filter(function(r){ return r.id!==pid; }); } });
+  if(!res.ok) { alert("⚠️ 删除失败"); return; }
+  renderPayroll();
+}
+function exportPayrollCsv() {
+  var month = _payMonth, rows = payrollRowsOf(month); if(!rows.length) { alert("这个月还没有工资表"); return; }
+  var edits = canEditPayroll() ? payEditsFromPage(rows) : {};
+  var csv = ["序号,姓名,昵称,部门/职位,状态,基本工资,出勤天数,请假天数,日薪,出勤工资,餐补,奖金,预支,扣款,实领工资,提成,实发总计,备注"];
+  var tot = 0;
+  rows.forEach(function(r, i){
+    var o = edits[r.id] || r;
+    var st = (_staff.find(function(s){ return s.id===r.staffId; })||{}).status || "在职";
+    csv.push([i+1,r.name,r.nickname||"",r.dept||"",st,r.base,o.days,o.leave||0,o.daily,o.attendancePay,o.meal||0,o.bonus||0,o.advance||0,o.deduction||0,o.net,o.commission||0,o.total,(o.note||"").replace(/,/g,"；")].join(","));
+    tot += o.total;
+  });
+  csv.push(["","合计","","","","","","","","","","","","","","",pr2(tot),""].join(","));
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿"+csv.join("\n")], {type:"text/csv;charset=utf-8"}));
+  a.download = "CAR_工资表_"+month+".csv"; a.click();
+}
+// ── 导入工资表Excel（跟老板的"汽车2部_工资表_xxxx年x月.xlsx"同格式）──
+function onPayrollFile(inp) {
+  var file = inp.files && inp.files[0]; if(!file) return;
+  if(!window.XLSX) { alert("请稍等，Excel组件还在加载"); return; }
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try {
+      var wb = XLSX.read(e.target.result, {type:"array"});
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var data = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+      var hi = -1;
+      for(var i=0;i<data.length;i++) { if(data[i] && data[i].indexOf("姓名")>=0 && data[i].indexOf("基本工资")>=0) { hi = i; break; } }
+      if(hi<0) { alert("❌ 没找到表头（需要有「姓名」「基本工资」列）"); return; }
+      var head = data[hi], col = function(n){ return head.indexOf(n); };
+      var rows = [];
+      for(var j=hi+1;j<data.length;j++) {
+        var r = data[j]; if(!r) continue;
+        var seq = r[col("序号")]; var name = r[col("姓名")];
+        if(!(typeof seq==="number") || !name) continue;
+        var num = function(n){ var v = r[col(n)]; return (typeof v==="number") ? v : (parseFloat(v)||0); };
+        var rec = { name:String(name).trim(), nickname:String(r[col("昵称")]||"").trim(), dept:String(r[col("部门/职位")]||"").trim(), status:String(r[col("状态")]||"在职").trim(),
+          base:num("基本工资"), days:num("出勤天数"), leave:num("请假天数"), meal:num("餐补"), bonus:num("奖金"), advance:num("预支"), deduction:num("扣款"), commission:num("提成"), note:String(r[col("备注")]||"").trim() };
+        var c = payCalc(rec); rec.daily = c.daily; rec.attendancePay = c.attendancePay; rec.net = c.net; rec.total = c.total;
+        // 以Excel里写的"实发总计"为准（跟老板手上的表对得上），只在差距超过1分钱时提醒
+        var xl = num("实发总计"); rec.xlTotal = xl;
+        rows.push(rec);
+      }
+      if(!rows.length) { alert("❌ 表里没有员工行"); return; }
+      var guess = "";
+      var mm = (file.name+" "+wb.SheetNames[0]).match(/(\d{4})\D{0,3}年?\D{0,2}(\d{1,2})月/);
+      if(mm) guess = mm[1]+"-"+String(mm[2]).padStart(2,"0");
+      var month = prompt("这份工资表是哪个月的？（YYYY-MM）\n共读到 "+rows.length+" 名员工", guess||_payMonth||curYM());
+      if(month===null) return; month = month.trim();
+      if(!/^\d{4}-\d{2}$/.test(month)) { alert("月份格式不对，请按 2026-09 这样填"); return; }
+      var sum = pr2(rows.reduce(function(a,r){ return a + r.total; }, 0));
+      var xlSum = pr2(rows.reduce(function(a,r){ return a + (r.xlTotal||0); }, 0));
+      if(!confirm("导入 "+month+" 工资表？\n"+rows.length+" 人，实发合计 "+pmoney(sum)+(Math.abs(sum-xlSum)>0.015?"\n（⚠️ Excel 里的合计是 "+pmoney(xlSum)+"，跟逐行相加差 "+pmoney(Math.abs(sum-xlSum))+"，多半是四舍五入）":"")+"\n\n导入后状态为「待发放」，在工资页点「确认发放」才会记入财务。\n已有的员工档案/同月同一个人的工资行不会重复添加。")) return;
+      doImportPayroll(month, rows);
+    } catch(err) { alert("❌ 解析失败："+err.message); }
+    inp.value = "";
+  };
+  reader.readAsArrayBuffer(file);
+}
+async function doImportPayroll(month, rows) {
+  var added = 0, skipped = 0;
+  var res = await mutateKeys({
+    car_staff: function(staff){
+      var maxNo = 0; staff.forEach(function(s){ var k = parseInt(String(s.id||"").replace(/\D/g,""),10)||0; if(k>maxNo) maxNo = k; });
+      var byName = {}; staff.forEach(function(s){ byName[s.name] = 1; });
+      rows.forEach(function(r){
+        if(byName[r.name]) return; maxNo++; byName[r.name] = 1;
+        staff.push({ id:"ST"+String(maxNo).padStart(3,"0"), name:r.name, nickname:r.nickname, dept:r.dept, status:(r.status==="离职"?"离职":"在职"), baseSalary:r.base, joinDate:"", phone:"", note:"", createdAt:new Date().toISOString() });
+      });
+      return staff;
+    },
+    car_payroll: function(arr, ctx){
+      added = 0; skipped = 0;
+      var idByName = {}; ctx.car_staff.forEach(function(s){ idByName[s.name] = s.id; });
+      var have = {}; arr.forEach(function(r){ have[r.id] = 1; });
+      rows.forEach(function(r){
+        var sid = idByName[r.name]; var id = "PR"+month.replace("-","")+"_"+sid;
+        if(have[id]) { skipped++; return; }
+        arr.unshift({ id:id, month:month, staffId:sid, name:r.name, nickname:r.nickname, dept:r.dept, base:r.base, days:r.days, leave:r.leave, daily:r.daily, attendancePay:r.attendancePay, meal:r.meal, bonus:r.bonus, advance:r.advance, deduction:r.deduction, net:r.net, commission:r.commission, total:r.total, note:r.note, status:"unpaid", createdAt:new Date().toISOString() });
+        added++;
+      });
+      return arr;
+    }
+  });
+  if(!res.ok) { alert("⚠️ 导入失败，数据没有被改动，请刷新后重试"); return; }
+  _payMonth = month; _payTab = "sheet";
+  alert("✅ 导入完成：新增 "+added+" 行"+(skipped?("，跳过已存在 "+skipped+" 行"):"")+"。\n状态为「待发放」，核对无误后点「确认发放」入账。");
+  renderPayroll();
+}
+
+// ── 员工档案 ──
+function payrollStaffHtml() {
+  var canEdit = canEditPayroll();
+  var h = '';
+  if(canEdit) h += '<div class="btn-row" style="margin:0 0 12px"><button class="btn btn-success" onclick="_staffFormOpen=!_staffFormOpen;_staffEditId=null;renderPayroll()">'+(_staffFormOpen&&!_staffEditId?'✖ 取消':'➕ 新增员工')+'</button></div>';
+  if(canEdit && _staffFormOpen) {
+    var e = _staffEditId ? (_staff.find(function(s){ return s.id===_staffEditId; })||{}) : {};
+    h += '<div class="card"><div class="card-title" style="margin-bottom:12px">'+(_staffEditId?'✏️ 编辑员工':'➕ 新增员工')+'</div><div class="form-grid">';
+    h += '<div class="form-group"><label>姓名 *</label><input type="text" id="st_name" value="'+hesc(e.name||"")+'"></div>';
+    h += '<div class="form-group"><label>昵称</label><input type="text" id="st_nick" value="'+hesc(e.nickname||"")+'"></div>';
+    h += '<div class="form-group"><label>部门/职位</label><input type="text" id="st_dept" value="'+hesc(e.dept||"汽车2部")+'"></div>';
+    h += '<div class="form-group"><label>基本工资（月，$）*</label><input type="number" step="0.01" id="st_base" value="'+(e.baseSalary!=null?e.baseSalary:"")+'"></div>';
+    h += '<div class="form-group"><label>状态</label><select id="st_status"><option value="在职"'+(e.status!=="离职"?' selected':'')+'>在职</option><option value="离职"'+(e.status==="离职"?' selected':'')+'>离职</option></select></div>';
+    h += '<div class="form-group"><label>入职日期</label><input type="date" id="st_join" value="'+hesc(e.joinDate||"")+'"></div>';
+    h += '<div class="form-group"><label>电话</label><input type="text" id="st_phone" value="'+hesc(e.phone||"")+'"></div>';
+    h += '<div class="form-group span2"><label>备注</label><input type="text" id="st_note" value="'+hesc(e.note||"")+'"></div>';
+    h += '</div><div class="btn-row"><button class="btn btn-primary" onclick="saveStaff()">✅ 保存</button><button class="btn btn-outline" onclick="_staffFormOpen=false;_staffEditId=null;renderPayroll()">取消</button></div></div>';
+  }
+  h += '<div class="card"><div class="card-title" style="margin-bottom:10px">👥 员工档案（'+_staff.length+'人，在职 '+_staff.filter(function(s){return s.status==="在职";}).length+'）</div>';
+  if(!_staff.length) h += '<div style="text-align:center;padding:24px;color:var(--muted)">还没有员工</div>';
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>编号</th><th>姓名</th><th>昵称</th><th>部门/职位</th><th>状态</th><th>基本工资</th><th>入职日期</th><th>备注</th>'+(canEdit?'<th>操作</th>':'')+'</tr></thead><tbody>';
+    _staff.slice().sort(function(a,b){ return String(a.id).localeCompare(String(b.id)); }).forEach(function(s){
+      h += '<tr><td>'+s.id+'</td><td style="font-weight:600">'+hesc(s.name)+'</td><td>'+hesc(s.nickname||"")+'</td><td>'+hesc(s.dept||"")+'</td><td>'+(s.status==="在职"?'<span class="badge badge-green">在职</span>':'<span class="badge badge-gray">离职</span>')+'</td><td>'+pmoney(s.baseSalary)+'</td><td>'+hesc(s.joinDate||"")+'</td><td style="font-size:12px;color:var(--muted)">'+hesc(s.note||"")+'</td>';
+      if(canEdit) h += '<td><button class="btn btn-sm btn-outline" onclick="editStaff(\''+s.id+'\')">编辑</button> <button class="btn btn-sm btn-outline" onclick="toggleStaffStatus(\''+s.id+'\')">'+(s.status==="在职"?'标记离职':'恢复在职')+'</button></td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table></div><div style="font-size:11px;color:var(--muted);margin-top:8px">改基本工资只影响以后新生成的工资表，已有的月份工资表不变。员工不删除，离职请标记「离职」。</div>';
+  }
+  return h + '</div>';
+}
+function editStaff(id) { if(!canEditPayroll()) return; _staffEditId = id; _staffFormOpen = true; renderPayroll(); }
+async function saveStaff() {
+  if(!canEditPayroll()) return;
+  var name = document.getElementById("st_name").value.trim();
+  var base = parseFloat(document.getElementById("st_base").value);
+  if(!name) { alert("请填写姓名"); return; }
+  if(isNaN(base) || base<0) { alert("请填写基本工资"); return; }
+  var f = { name:name, nickname:document.getElementById("st_nick").value.trim(), dept:document.getElementById("st_dept").value.trim(), baseSalary:base,
+    status:document.getElementById("st_status").value, joinDate:document.getElementById("st_join").value, phone:document.getElementById("st_phone").value.trim(), note:document.getElementById("st_note").value.trim() };
+  var editId = _staffEditId;
+  var res = await mutateKeys({ car_staff: function(arr){
+    if(editId) { arr.forEach(function(s){ if(s.id===editId) Object.assign(s, f); }); return arr; }
+    if(arr.some(function(s){ return s.name===f.name; })) return arr; // 同名不重复加
+    var maxNo = 0; arr.forEach(function(s){ var k = parseInt(String(s.id||"").replace(/\D/g,""),10)||0; if(k>maxNo) maxNo = k; });
+    arr.push(Object.assign({ id:"ST"+String(maxNo+1).padStart(3,"0"), createdAt:new Date().toISOString() }, f));
+    return arr;
+  }});
+  if(!res.ok) { alert("⚠️ 保存失败，请刷新后重试"); return; }
+  _staffFormOpen = false; _staffEditId = null; renderPayroll();
+}
+async function toggleStaffStatus(id) {
+  if(!canEditPayroll()) return;
+  var res = await mutateKeys({ car_staff: function(arr){ arr.forEach(function(s){ if(s.id===id) s.status = (s.status==="在职"?"离职":"在职"); }); return arr; } });
+  if(!res.ok) { alert("⚠️ 保存失败"); return; }
+  renderPayroll();
+}
+
+// ══════════ 日常开支页 ══════════
+function renderDailyExpense() {
+  if(!canViewFinance()) { alert("⛔ 你的账号没有权限查看日常开支"); nav("home"); return; }
+  if(!_dailyMonth) _dailyMonth = curYM();
+  var canAdd = CURRENT_ROLE==="boss";
+  var all = _financeRecords.filter(function(r){ return r.type==="expense" && String(r.date||"").slice(0,7)===_dailyMonth; });
+  var salary = all.filter(function(r){ return r.category==="工资支出"; });
+  var daily = all.filter(function(r){ return r.category!=="工资支出"; });
+  var sum = function(a){ return pr2(a.reduce(function(s,r){ return s + (Number(r.amount)||0); }, 0)); };
+  var months = {}; _financeRecords.forEach(function(r){ if(r.type==="expense" && r.date) months[String(r.date).slice(0,7)] = 1; });
+  months[curYM()] = 1; months[_dailyMonth] = 1;
+  var h = '<div class="page-header"><div class="page-title">🛒 日常开支</div><div class="page-sub">按月查看全部支出（含员工工资），按分类汇总，快速登记房租/水电/餐费等；同样会进入利润表和现金流'+(canAdd?'':'（你的账号为只读）')+'</div></div>';
+  h += '<div class="search-row"><select id="dailyMonthSel" onchange="_dailyMonth=this.value;renderDailyExpense()">';
+  Object.keys(months).sort().reverse().forEach(function(m){ h += '<option value="'+m+'"'+(m===_dailyMonth?' selected':'')+'>'+m+'</option>'; });
+  h += '</select></div>';
+  h += '<div class="stats-grid" style="margin-bottom:14px">';
+  h += '<div class="stat-card red"><div class="stat-label">'+_dailyMonth+' 总支出</div><div class="stat-value">'+pmoney(sum(all))+'</div><div class="stat-sub">'+all.length+' 笔</div></div>';
+  h += '<div class="stat-card amber"><div class="stat-label">日常开支（不含工资）</div><div class="stat-value">'+pmoney(sum(daily))+'</div><div class="stat-sub">'+daily.length+' 笔</div></div>';
+  h += '<div class="stat-card blue"><div class="stat-label">员工工资</div><div class="stat-value">'+pmoney(sum(salary))+'</div><div class="stat-sub">'+(salary.length?'已发放入账':'本月工资还未入账')+'</div></div>';
+  h += '</div>';
+  // 分类汇总
+  var byCat = {}; all.forEach(function(r){ byCat[r.category] = pr2((byCat[r.category]||0) + (Number(r.amount)||0)); });
+  var cats = Object.keys(byCat).sort(function(a,b){ return byCat[b]-byCat[a]; });
+  var total = sum(all);
+  h += '<div class="card"><div class="card-title" style="margin-bottom:10px">📊 分类汇总</div>';
+  if(!cats.length) h += '<div style="color:var(--muted);font-size:13px;padding:8px 0">本月还没有支出记录</div>';
+  cats.forEach(function(c){
+    var pct = total>0 ? Math.round(byCat[c]/total*100) : 0;
+    h += '<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px"><span style="width:96px">'+hesc(c)+'</span><div style="flex:1;background:#f0f0f0;border-radius:4px;height:10px"><div style="width:'+pct+'%;background:'+(c==="工资支出"?'#1565c0':'#ef5350')+';height:10px;border-radius:4px"></div></div><span style="width:100px;text-align:right;font-weight:600">'+pmoney(byCat[c])+'</span><span style="width:40px;text-align:right;color:var(--muted)">'+pct+'%</span></div>';
+  });
+  h += '</div>';
+  // 登记表单
+  if(canAdd) {
+    h += '<div class="card"><div class="card-title" style="margin-bottom:12px">➕ 登记一笔日常开支</div><div class="form-grid">';
+    h += '<div class="form-group"><label>日期</label><input type="date" id="de_date" value="'+todayStr()+'"></div>';
+    h += '<div class="form-group"><label>金额（$）*</label><input type="number" step="0.01" min="0" id="de_amount"></div>';
+    h += '<div class="form-group"><label>分类</label><select id="de_cat">'+DAILY_CATS.map(function(c){ return '<option value="'+c+'">'+c+'</option>'; }).join('')+'<optgroup label="其他分类">'+LEGACY_EXP_CATS.map(function(c){ return '<option value="'+c+'">'+c+'</option>'; }).join('')+'</optgroup></select></div>';
+    h += '<div class="form-group span3"><label>说明（付给谁/什么用途）</label><input type="text" id="de_note" placeholder="如：10月办公室租金 / 员工午餐"></div>';
+    h += '</div><div class="btn-row"><button class="btn btn-primary" onclick="saveDailyExpense()">✅ 保存</button></div><div style="font-size:11px;color:var(--muted);margin-top:8px">员工工资请到「员工工资」页面确认发放，系统会自动入账，不用在这里重复登记。</div></div>';
+  }
+  // 明细
+  var filtered = all.filter(function(r){ return (!_dailyCat || r.category===_dailyCat) && (!_dailyQ || (String(r.note||"")+r.category).toLowerCase().indexOf(_dailyQ.toLowerCase())>=0); });
+  filtered.sort(function(a,b){ return String(b.date).localeCompare(String(a.date)); });
+  h += '<div class="card"><div class="card-title" style="margin-bottom:10px">📋 '+_dailyMonth+' 支出明细</div>';
+  h += '<div class="search-row"><select id="dailyCatSel" onchange="_dailyCat=this.value;renderDailyExpense()"><option value="">全部分类</option>'+cats.map(function(c){ return '<option value="'+hesc(c)+'"'+(c===_dailyCat?' selected':'')+'>'+hesc(c)+'</option>'; }).join('')+'</select><input type="text" id="dailyQ" placeholder="搜索说明" value="'+hesc(_dailyQ)+'" onchange="_dailyQ=this.value.trim();renderDailyExpense()"><button class="btn btn-outline" onclick="exportDailyCsv()">📥 导出本月CSV</button></div>';
+  if(!filtered.length) h += '<div style="text-align:center;padding:24px;color:var(--muted)">没有记录</div>';
+  else {
+    h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>分类</th><th>金额</th><th>说明</th><th>操作</th></tr></thead><tbody>';
+    filtered.forEach(function(r){
+      var fromPay = !!r.payrollMonth;
+      h += '<tr><td>'+formatDate(r.date)+'</td><td>'+hesc(r.category)+(fromPay?' <span class="badge badge-blue">工资表</span>':'')+'</td><td style="font-weight:600;color:#c62828">'+pmoney(r.amount)+'</td><td style="font-size:12px;color:var(--muted)">'+hesc(r.note||"")+(r.loanId?' · 关联'+hesc(r.loanId):'')+'</td>';
+      h += '<td>'+(fromPay ? '<span style="font-size:12px;color:var(--muted)">在「员工工资」页处理</span>' : (canDelete()?'<button class="btn btn-sm btn-danger" onclick="deleteDailyExpense(\''+r.id+'\')">删除</button>':'<span style="font-size:12px;color:var(--muted)">只读</span>'))+'</td></tr>';
+    });
+    h += '<tr style="background:#fafafa;font-weight:700"><td colspan="2">合计</td><td style="color:#c62828">'+pmoney(sum(filtered))+'</td><td colspan="2"></td></tr>';
+    h += '</tbody></table></div>';
+  }
+  h += '</div>';
+  document.getElementById("mainContent").innerHTML = h;
+}
+async function saveDailyExpense() {
+  if(CURRENT_ROLE!=="boss" || _dailyBusy) return;
+  var amount = parseFloat(document.getElementById("de_amount").value);
+  if(!amount || amount<=0) { alert("请输入有效的金额"); return; }
+  var date = document.getElementById("de_date").value || todayStr();
+  var rec = { id:"F"+Date.now(), type:"expense", amount:amount, category:document.getElementById("de_cat").value, date:date, loanId:"", note:document.getElementById("de_note").value.trim() };
+  _dailyBusy = true;
+  try {
+    var res = await mutateData(null, function(fin){ fin.unshift(rec); return fin; });
+    if(!res || !res.ok) { alert("⚠️ 保存失败，请检查网络后重试"); return; }
+    _dailyMonth = String(date).slice(0,7);
+    renderDailyExpense();
+  } finally { _dailyBusy = false; }
+}
+async function deleteDailyExpense(id) {
+  if(!canDelete()) { alert("⛔ 只有老板账号能删除"); return; }
+  var rec = _financeRecords.find(function(r){ return r.id===id; });
+  if(rec && rec.payrollMonth) { alert("这笔来自工资表，请到「员工工资」页处理"); return; }
+  if(!requireDeletePassword("删除这条支出记录")) return;
+  await mutateData(null, function(fin){ return fin.filter(function(r){ return r.id!==id; }); });
+  renderDailyExpense();
+}
+function exportDailyCsv() {
+  var rows = _financeRecords.filter(function(r){ return r.type==="expense" && String(r.date||"").slice(0,7)===_dailyMonth; }).sort(function(a,b){ return String(a.date).localeCompare(String(b.date)); });
+  var csv = ["日期,分类,金额,说明,合同编号"];
+  rows.forEach(function(r){ csv.push([r.date,r.category,r.amount,(r.note||"").replace(/,/g,"；"),r.loanId||""].join(",")); });
+  csv.push(["合计","",pr2(rows.reduce(function(s,r){ return s+(Number(r.amount)||0); },0)),"",""].join(","));
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿"+csv.join("\n")], {type:"text/csv;charset=utf-8"}));
+  a.download = "CAR_日常开支_"+_dailyMonth+".csv"; a.click();
+}
+
 // ══ 自动快照页（系统管理员）══ 服务器每次保存前自动存"保存前的完整数据"，万一哪天记录
 // 不见了，来这里下载最近的快照，再用"恢复数据"导回去。格式跟"备份数据"完全一样。
 async function renderSnapshots() {
@@ -702,7 +1270,7 @@ async function downloadSnapshot(id) {
     var d = await res.json();
     if(!res.ok) throw new Error(d.message||"下载失败");
     var a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([JSON.stringify({car_loans:d.car_loans, car_finance:d.car_finance},null,2)],{type:"application/json"}));
+    a.href = URL.createObjectURL(new Blob([JSON.stringify({car_loans:d.car_loans, car_finance:d.car_finance, car_staff:d.car_staff||[], car_payroll:d.car_payroll||[]},null,2)],{type:"application/json"}));
     a.download = "CAR_autosnap_"+id+".json"; a.click();
   } catch(e) { alert("❌ "+e.message); }
 }
@@ -710,7 +1278,7 @@ async function downloadSnapshot(id) {
 function doBackup() {
   if(!isSuperAdmin()) { alert("⛔ 只有系统管理员能备份数据"); return; }
   var today = new Date().toISOString().slice(0,10);
-  var j = JSON.stringify({car_loans:_loans, car_finance:_financeRecords},null,2);
+  var j = JSON.stringify({car_loans:_loans, car_finance:_financeRecords, car_staff:_staff, car_payroll:_payroll},null,2);
   var a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([j],{type:"application/json"}));
   a.download = "CAR_backup_"+today+".json"; a.click();
@@ -732,8 +1300,8 @@ function doRestore() {
       try{
         var d=JSON.parse(ev.target.result);
         if(!d.car_loans&&!d.car_finance){alert("❌ 无效备份文件");return;}
-        if(!confirm("确定恢复？将覆盖当前数据\n合同："+((d.car_loans||[]).length)+"条，财务："+((d.car_finance||[]).length)+"条"))return;
-        _loans=d.car_loans||[];_financeRecords=d.car_finance||[];
+        if(!confirm("确定恢复？将覆盖当前数据\n合同："+((d.car_loans||[]).length)+"条，财务："+((d.car_finance||[]).length)+"条，员工："+((d.car_staff||[]).length)+"人，工资行："+((d.car_payroll||[]).length)+"条"))return;
+        _loans=d.car_loans||[];_financeRecords=d.car_finance||[];_staff=d.car_staff||_staff;_payroll=d.car_payroll||_payroll;
         await saveLoans({bulkReplace:true});alert("✅ 恢复成功！");nav("home");
       }catch(err){alert("❌ 解析失败："+err.message);}
     };reader.readAsText(file);
@@ -900,7 +1468,7 @@ async function deleteUserAccount(id, label) {
 var _oplog = [];
 var _oplogFilter = {dataKey:"", action:"", username:""};
 var OPLOG_ACTION_LABEL = {add:"➕ 新增", edit:"✏️ 编辑", delete:"🗑️ 删除"};
-var OPLOG_KEY_LABEL = {car_loans:"贷款/收购车辆", car_finance:"财务记录", car_users:"账号管理"};
+var OPLOG_KEY_LABEL = {car_loans:"贷款/收购车辆", car_finance:"财务记录", car_staff:"员工档案", car_payroll:"工资表", car_users:"账号管理"};
 async function renderOplog() {
   if(!isSuperAdmin()) { alert("⛔ 只有系统管理员能查看操作日志"); nav("home"); return; }
   document.getElementById('mainContent').innerHTML = '<div class="card" style="text-align:center;padding:50px;color:var(--muted)">加载中...</div>';
@@ -916,7 +1484,7 @@ function renderOplogBody() {
   _oplog.forEach(function(o){ if(operators.indexOf(o.username)===-1) operators.push(o.username); });
 
   h+='<div class="search-row">';
-  h+='<select id="ol_dataKey" onchange="onOplogFilterChange()"><option value="">全部类型</option><option value="car_loans">贷款/收购车辆</option><option value="car_finance">财务记录</option><option value="car_users">账号管理</option></select>';
+  h+='<select id="ol_dataKey" onchange="onOplogFilterChange()"><option value="">全部类型</option><option value="car_loans">贷款/收购车辆</option><option value="car_finance">财务记录</option><option value="car_staff">员工档案</option><option value="car_payroll">工资表</option><option value="car_users">账号管理</option></select>';
   h+='<select id="ol_action" onchange="onOplogFilterChange()"><option value="">全部动作</option><option value="add">新增</option><option value="edit">编辑</option><option value="delete">删除</option></select>';
   h+='<select id="ol_username" onchange="onOplogFilterChange()"><option value="">全部操作人</option>'+operators.map(function(u){return '<option value="'+u+'">'+u+'</option>';}).join('')+'</select>';
   h+='<button class="btn btn-outline" onclick="renderOplog()">🔄 刷新</button>';
@@ -1287,7 +1855,7 @@ async function saveLoans(opts) {
   try {
     setSyncStatus("syncing");
     var body = {car_loans:_loans, car_finance:_financeRecords};
-    if(opts && opts.bulkReplace) body._bulkReplace = true; // 仅"恢复数据"整体覆盖时使用，服务器只认系统管理员
+    if(opts && opts.bulkReplace) { body._bulkReplace = true; body.car_staff = _staff; body.car_payroll = _payroll; } // 仅"恢复数据"整体覆盖时使用，服务器只认系统管理员
     var res = await fetch("/api/data", {
       method:"POST",
       headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
@@ -1320,12 +1888,16 @@ async function loadAllData() {
     _loans = data.car_loans || [];
     _financeRecords = data.car_finance || [];
     _loanPeriods = data.car_finance_periods || [];
+    _staff = data.car_staff || [];
+    _payroll = data.car_payroll || [];
     setSyncStatus("ok");
   } catch(e) {
     setSyncStatus("error");
     _loans = [];
     _financeRecords = [];
     _loanPeriods = [];
+    _staff = [];
+    _payroll = [];
   }
 }
 
@@ -1698,6 +2270,8 @@ function buildSidebar() {
     items.push({id:"finance_cashflow", icon:"💰", label:"现金流"});
     items.push({id:"finance_income", icon:"💵", label:canAddFinance()?"其他收入登记":"收入记录（只读）"});
     items.push({id:"finance_expense", icon:"💸", label:canAddFinance()?"支出登记":"支出记录（只读）"});
+    items.push({id:"daily_expense", icon:"🛒", label:"日常开支"});
+    items.push({id:"payroll", icon:"👷", label:"员工工资"});
   } else if(canManualFinanceEntry()) {
     // 被单独授权的业务员账号（比如siyan）：只给这两张表单，不给利润表/历史结算/
     // 现金流这几张能看到全部财务数据的页面——跟其他业务员区分开
@@ -1737,7 +2311,8 @@ var PAGE_REQUIRES = {
   backup:"superAdmin", restore:"superAdmin", user_manage:"superAdmin", data_check:"superAdmin", oplog:"superAdmin", snapshots:"superAdmin", recover:"superAdmin", dupfix:"superAdmin",
   finance_pnl:"viewFinance", settlement:"viewFinance", finance_cashflow:"viewFinance",
   haircut_detail:"viewFinance", interest_detail:"viewFinance", profit_detail:"viewFinance", middleman_detail:"viewFinance",
-  finance_income:"financeEntry", finance_expense:"financeEntry"
+  finance_income:"financeEntry", finance_expense:"financeEntry",
+  daily_expense:"viewFinance", payroll:"viewFinance"
 };
 function pageAllowed(page) {
   var req = PAGE_REQUIRES[page];
@@ -1835,6 +2410,8 @@ function nav(page) {
   else if(page==="snapshots") renderSnapshots();
   else if(page==="recover") renderRecover();
   else if(page==="dupfix") renderDupFix();
+  else if(page==="daily_expense") renderDailyExpense();
+  else if(page==="payroll") renderPayroll();
 }
 
 // ══ 首页数字点进去看明细 ══
@@ -3406,6 +3983,8 @@ async function saveFinanceRecord(type) {
 
 async function deleteFinanceRecord(id) {
   if(!canDelete()) { alert("⛔ 只有老板账号能删除"); return; }
+  var _pr = _financeRecords.find(function(r){ return r.id===id; });
+  if(_pr && _pr.payrollMonth) { alert("这笔是工资表自动入账的，请到「员工工资」页点「撤销发放」处理，避免工资表和财务对不上"); return; }
   if(!requireDeletePassword("删除这条财务记录")) return;
   await mutateData(null, function(freshFinance) {
     return freshFinance.filter(function(r){ return r.id!==id; });
