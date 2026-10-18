@@ -689,6 +689,15 @@ app.post('/api/data', auth, async (req, res) => {
       }
       const check = checkKeyPermission(req.user, key, body[key], current);
       if (!check.ok) return res.status(403).json({ error: 'PERMISSION_DENIED', message: check.reason });
+      // 2026-10-18 员工档案/工资表只有 boss 主账号（系统管理员）能改；工资表自动入账的财务记录（payrollMonth/FPAY_）同样只有主账号能动
+      const isSuper = req.user.role === 'boss' && req.user.isSuperAdmin === true;
+      if ((key === 'car_staff' || key === 'car_payroll') && !isSuper) {
+        return res.status(403).json({ error: 'PERMISSION_DENIED', message: '员工档案/工资表只有 boss 主账号能修改' });
+      }
+      if (key === 'car_finance' && !isSuper) {
+        const touched = [].concat(check.added || [], check.edited || [], check.removed || []).find(r => r && (r.payrollMonth || String(r.id || '').startsWith('FPAY_')));
+        if (touched) return res.status(403).json({ error: 'PERMISSION_DENIED', message: '工资入账记录只有 boss 主账号能修改' });
+      }
       // 2026-10-14 新增"撞号拒绝"：客户端声明"这次是新增的记录ID"，如果这些ID在数据库里已经存在，
       // 说明两个人几乎同时新增、拿到了同一个编号。以前服务器会把后到的那条当成"编辑"，直接覆盖先到的
       // 那条（订单凭空被盖掉）；现在直接拒绝，让客户端重新生成编号再提交。
