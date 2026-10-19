@@ -251,7 +251,7 @@ html,body{overflow:auto;height:auto}
 
 // ══ 版本号：老板每次改完系统、贴到GitHub部署新版之后，把这个数字改一下 ══
 // （改哪一位都行，只要跟上一个版本不一样，业务员浏览器就能感知到"有新版本"）
-var APP_VERSION = "20261018c";
+var APP_VERSION = "20261019a";
 var _pendingUpdate = false;   // 已经检测到线上有新版本，还没刷新
 var _updateSnoozed = false;   // 业务员点了"稍后"，先别再弹倒计时打扰他
 // 只在这些"纯浏览/看报表"页面允许直接自动刷新——凡是可能正在填表/登记的页面
@@ -2047,7 +2047,7 @@ async function mutateData(applyLoans, applyFinance, _retried) {
   }
 }
 function formatDate(d) { if(!d) return "-"; var dt=new Date(d); return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0"); }
-function formatMoney(n) { return "¥"+Number(n).toLocaleString(); }
+function formatMoney(n) { return "$"+Number(n).toLocaleString(); } // 2026-10-19：全系统统一用美元符号（以前这里是¥，现金流/收入记录里显示成¥，跟利润表的$对不上）
 // 砍头息 = 贷款金额 − 实际放款金额（精确，直接用两个原始数字相减）；
 // 只有当实际放款金额缺失时，才退回用砍头%估算（砍头%本身是四舍五入过的，会有误差）
 function loanHaircutAmount(l) {
@@ -3996,14 +3996,22 @@ function renderFinanceForm(type) {
 
   // 最近记录
   h+='<div class="card"><div class="card-header"><div class="card-title">📋 最近'+(isIncome?'收入':'支出')+'记录</div></div>';
-  var records=_financeRecords.filter(function(r){return r.type===type;}).slice(0,15);
+  var records=_financeRecords.filter(function(r){return r.type===type;}).slice().sort(function(a,b){return String(b.date||'').localeCompare(String(a.date||''));});
+  // 2026-10-19 对账汇总：按分类合计，跟现金流/利润表逐项对得上
+  if(records.length>0) {
+    var _from = records.filter(function(r){return isFromCutoff(r.date);});
+    var _by = {}; _from.forEach(function(r){ _by[r.category] = (_by[r.category]||0) + r.amount; });
+    var _tot = _from.reduce(function(s2,r){return s2+r.amount;},0);
+    h+='<div style="background:#f5f9ff;border:1px solid #d6e4f5;border-radius:8px;padding:12px 14px;margin-bottom:12px;font-size:13px;line-height:1.8"><b>'+SETTLEMENT_CUTOFF+' 起合计 '+formatMoney(Math.round(_tot*100)/100)+'</b>（与现金流'+(isIncome?'总收入':'总支出里的登记部分')+'一致）：'+Object.keys(_by).sort(function(a,b){return _by[b]-_by[a];}).map(function(k){return k+' '+formatMoney(Math.round(_by[k]*100)/100);}).join(' ｜ ')+'<div style="font-size:11px;color:var(--muted)">灰色"历史"行是 '+SETTLEMENT_CUTOFF+' 之前的旧账，已在"历史结算"里结清，不计入现金流和利润表。共 '+records.length+' 条，按日期从新到旧。</div></div>';
+  }
   if(records.length===0){h+='<div style="text-align:center;padding:30px;color:var(--muted)">暂无记录</div>';}
   else {
     h+='<div class="table-wrap"><table><thead><tr><th>日期</th><th>金额</th><th>分类</th><th>关联合同</th><th>备注</th><th>操作</th></tr></thead><tbody>';
     records.forEach(function(r){
       var loan=r.loanId?_loans.find(function(l){return l.id===r.loanId;}):null;
-      h+='<tr><td>'+formatDate(r.date)+'</td>';
-      h+='<td style="font-weight:600;color:#2e7d32">'+formatMoney(r.amount)+'</td>';
+      var _hist = isBeforeCutoff(r.date);
+      h+='<tr'+(_hist?' style="opacity:.55"':'')+'><td>'+formatDate(r.date)+(_hist?' <span class="badge badge-gray">历史</span>':'')+'</td>';
+      h+='<td style="font-weight:600;color:'+(isIncome?'#2e7d32':'#c62828')+'">'+formatMoney(r.amount)+'</td>';
       h+='<td>'+r.category+'</td>';
       h+='<td style="font-size:12px">'+(loan?r.loanId+'<br><span style="color:var(--muted)">'+loan.name+'</span>':(r.loanId||'—'))+'</td>';
       h+='<td style="color:var(--muted);font-size:12px">'+(r.note||'')+'</td>';
@@ -4075,15 +4083,27 @@ function renderFinancePnL() {
   // 中间人介绍费：本月新放款的合同里手填的固定金额，不影响客户实际到手放款金额，
   // 按放款日期归属到本月，算一笔运营成本（跟砍头息归属逻辑一样）
   var monthMiddlemanFee = monthNewLoans.reduce(function(s,l){return s+(l.middlemanFee||0);},0);
-  // ══ 按月应收/实收数据（从Excel表格提取）══
-  var _MONTHLY_DATA = {"2026-03": {"due_int": 414, "recv_int": 414, "due_prin": 4200, "recv_prin": 4200}, "2026-04": {"due_int": 5174, "recv_int": 5174, "due_prin": 62360, "recv_prin": 58360}, "2026-05": {"due_int": 13750, "recv_int": 13253, "due_prin": 147200, "recv_prin": 135300}, "2026-06": {"due_int": 14022, "recv_int": 9016, "due_prin": 73694, "recv_prin": 47134}, "2026-07": {"due_int": 17460, "recv_int": 1000, "due_prin": 47452, "recv_prin": 5500}, "2026-08": {"due_int": 15912, "recv_int": 0, "due_prin": 39772, "recv_prin": 0}, "2026-09": {"due_int": 14227, "recv_int": 0, "due_prin": 84428, "recv_prin": 0}, "2026-10": {"due_int": 7803, "recv_int": 0, "due_prin": 1833, "recv_prin": 0}, "2026-11": {"due_int": 5843, "recv_int": 0, "due_prin": 833, "recv_prin": 0}, "2026-12": {"due_int": 3305, "recv_int": 0, "due_prin": 4133, "recv_prin": 0}};
-  var _md = _MONTHLY_DATA[selMonth] || null;
-  var monthIntDue   = _md ? _md.due_int   : inBetLoans.reduce(function(s,l){return s+l.amount*(l.rate||0)/100;},0);
-  var monthPrinDue  = _md ? _md.due_prin  : 0;
-  var monthPrinRecv_excel = _md ? _md.recv_prin : 0;
-  var monthIntRecv_excel  = _md ? _md.recv_int  : 0;
-  var monthDueRecords = _md ? [_md] : [];
-  var _hasExcelData = !!_md;
+  // ══ 2026-10-19 修复"利润表顶部实收跟下面损益表对不上"：以前这里用一份写死的Excel数据（2026-08起实收全是0），
+  // 导致9月明明收了利息$665、本金$1,500，顶部卡片却显示$0。现在：
+  //   实收利息/实收本金 = 收入登记里本月真实记录（跟下面损益表、现金流、收入记录同一份数据）
+  //   月应收利息 = 按合同还款计划算出"本月到期的利息"（已结清合同只算已经收过的那几期）
+  var monthIntDue = 0;
+  var _paidInt = {};
+  _financeRecords.forEach(function(r){
+    if(r.type!=='income' || r.category!=='利息收入' || !r.loanId) return;
+    var p = r.period; if(!p) { var mm = /第(\d+)期/.exec(r.note||''); p = mm ? parseInt(mm[1],10) : 0; }
+    if(p) _paidInt[r.loanId+'#'+p] = 1;
+  });
+  _lr.forEach(function(l){
+    if(l.status==='pending') return;
+    var sch = (loanFreshInterestCalc(l).schedule)||[];
+    sch.forEach(function(e,i2){
+      if(!e || !e.dueDate || String(e.dueDate).slice(0,7)!==selMonth || !(e.interest>0)) return;
+      if(l.status==='closed' && !_paidInt[l.id+'#'+(i2+1)]) return; // 已结清合同：没收过利息的期数不再算应收
+      monthIntDue += e.interest;
+    });
+  });
+  var _hasExcelData = false;
   var recInc  = _financeRecords.filter(function(r){return r.type==='income' && inMonth(r.date,selMonth);});
   var recExp  = _financeRecords.filter(function(r){return r.type==='expense'&& inMonth(r.date,selMonth);});
   // 利息收入（不含本金回收）
@@ -4094,8 +4114,8 @@ function renderFinancePnL() {
   // 实收利息：优先Excel数据，其次收入登记
   var monthIntRecv_login  = recInc.filter(function(r){return r.category==='利息收入';}).reduce(function(s,r){return s+r.amount;},0);
   var monthPrinRecv_login = manPrinRecov;
-  var monthIntRecv  = _hasExcelData ? monthIntRecv_excel  : monthIntRecv_login;
-  var monthPrinRecv = _hasExcelData ? monthPrinRecv_excel : monthPrinRecv_login;
+  var monthIntRecv  = monthIntRecv_login;
+  var monthPrinRecv = monthPrinRecv_login;
   var incByCat={}, expByCat={};
   recInc.forEach(function(r){incByCat[r.category]=(incByCat[r.category]||0)+r.amount;});
   recExp.forEach(function(r){expByCat[r.category]=(expByCat[r.category]||0)+r.amount;});
@@ -4122,10 +4142,10 @@ function renderFinancePnL() {
   h+='<div class="stats-grid" style="margin-bottom:18px">';
   h+='<div class="stat-card blue"><div class="stat-icon">🏦</div><div class="stat-label">在贷本金总额</div><div class="stat-value" style="font-size:18px">$'+totalPrincipal.toLocaleString()+'</div><div class="stat-sub">共'+(activeLoans.length+overdueLoans.length)+'笔在贷</div></div>';
   h+='<div class="stat-card green"><div class="stat-icon">📤</div><div class="stat-label">本月新放款</div><div class="stat-value" style="font-size:18px">$'+monthNewAmount.toLocaleString()+'</div><div class="stat-sub">'+monthNewLoans.length+'笔 · 实际$'+Math.round(monthNewActual).toLocaleString()+'</div></div>';
-  h+='<div class="stat-card amber"><div class="stat-icon">💰</div><div class="stat-label">月应收利息</div><div class="stat-value" style="font-size:18px">$'+monthIntDue.toFixed(0)+'</div><div class="stat-sub">'+(_hasExcelData?'来自Excel数据':'按在贷合同估算')+'</div></div>';
+  h+='<div class="stat-card amber"><div class="stat-icon">💰</div><div class="stat-label">月应收利息</div><div class="stat-value" style="font-size:18px">$'+monthIntDue.toFixed(0)+'</div><div class="stat-sub">'+'按合同还款计划算出本月到期的利息'+'</div></div>';
   h+='</div>';
   // 第二行：实收统计
-  h+='<div style="margin-bottom:10px;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px">▌ 本月实收（来自收入登记）</div>';
+  h+='<div style="margin-bottom:10px;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:1px">▌ 本月实收（来自收入登记，和下面损益表、现金流同一份数据）</div>';
   h+='<div class="stats-grid" style="margin-bottom:18px">';
   h+='<div class="stat-card green"><div class="stat-icon">✅</div><div class="stat-label">实收利息</div><div class="stat-value" style="font-size:18px">$'+monthIntRecv.toFixed(0)+'</div><div class="stat-sub">利息收入登记合计</div></div>';
   h+='<div class="stat-card blue"><div class="stat-icon">🏦</div><div class="stat-label">实收本金</div><div class="stat-value" style="font-size:18px">$'+monthPrinRecv.toFixed(0)+'</div><div class="stat-sub">本金回收登记合计</div>';
@@ -4224,11 +4244,19 @@ function renderCashFlow() {
   var totalIncome = cashRecords.filter(function(r){return r.type==="income"}).reduce(function(s,r){return s+r.amount},0);
   var totalExpense = cashRecords.filter(function(r){return r.type==="expense"}).reduce(function(s,r){return s+r.amount},0);
   var balance = totalIncome - totalExpense;
+  // 2026-10-19 对账说明：把总收入/总支出按分类拆开，能直接跟"收入记录""利润表"逐项对上
+  var _incBy = {}, _expBy = {};
+  cashRecords.forEach(function(r){
+    var k = String(r.category||"其他").split("（")[0];
+    var m = r.type==="income" ? _incBy : _expBy; m[k] = (m[k]||0) + r.amount;
+  });
+  var _bd = function(m, color){ return Object.keys(m).sort(function(a,b){return m[b]-m[a];}).map(function(k){ return '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px"><span>'+k+'</span><b style="color:'+color+'">'+formatMoney(Math.round(m[k]*100)/100)+'</b></div>'; }).join(''); };
   var h = '<div class="page-header"><div class="page-title">💰 现金流</div><div class="page-sub">资金流水与余额变化 · 只看 '+SETTLEMENT_CUTOFF+' 起的流水，之前的是历史数据，见<a href="javascript:void(0)" onclick="nav(\'settlement\')" style="color:var(--blue)">历史结算存档</a></div></div>';
   h += '<div class="stats-grid"><div class="stat-card green"><div class="stat-label">总收入</div><div class="stat-value">'+formatMoney(totalIncome)+'</div></div>';
   h += '<div class="stat-card red"><div class="stat-label">总支出</div><div class="stat-value">'+formatMoney(totalExpense)+'</div></div>';
   h += '<div class="stat-card blue"><div class="stat-label">当前余额</div><div class="stat-value">'+formatMoney(balance)+'</div></div>';
   h += '<div class="stat-card amber"><div class="stat-label">交易笔数</div><div class="stat-value">'+cashRecords.length+'</div></div></div>';
+  h += '<div class="card"><div class="card-title" style="margin-bottom:10px">🧮 对账说明（'+SETTLEMENT_CUTOFF+' 起）</div><div class="form-grid" style="grid-template-columns:1fr 1fr;gap:24px"><div><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">总收入 '+formatMoney(Math.round(totalIncome*100)/100)+' 由这些组成</div>'+_bd(_incBy,'#2e7d32')+'</div><div><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">总支出 '+formatMoney(Math.round(totalExpense*100)/100)+' 由这些组成</div>'+_bd(_expBy,'#c62828')+'</div></div><div style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.7">这里只统计"收入登记 + 支出登记 + 合同里的介绍费"，<b>不含</b>放款出去的本金，也不含砍头息，所以"当前余额"不是银行账户余额，只是登记流水的收支差。<br>回款以「收入记录」为准：本页总收入 = 收入记录里 '+SETTLEMENT_CUTOFF+' 起所有记录之和；利润表里"本金回收"不算利润，所以利润表的收入和这里不一样是正常的。</div></div>';
   h += '<div class="card"><div class="card-header"><div class="card-title">📋 流水明细</div></div>';
   if(flowData.length===0) { h += '<div style="text-align:center;padding:30px;color:var(--muted)">暂无流水记录</div>'; }
   else {
